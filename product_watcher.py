@@ -392,6 +392,58 @@ class ProductWatcher:
         
         return "Unknown"
 
+
+    async def purge_wrong_cart_items(self, expected_name=None):
+        """Remove any cart items whose name does not match the expected product.
+
+        This method will open the cart if necessary, scrape the list of item ids
+        and titles, and then invoke the order service to remove anything that
+        looks like a mismatch (based on fuzzy similarity). It returns a list of
+        removed product ids for logging.
+        """
+        removed_ids = []
+        try:
+            # ensure cart is visible before scraping
+            if not await self.order.page.is_visible("text=My Cart"):
+                # try clicking cart button if not open
+                if await self.order.page.is_visible("div[class*='CartButton']"):
+                    await self.order.page.click("div[class*='CartButton']")
+                    await asyncio.sleep(1)
+
+            # gather id/name pairs from the cart DOM
+            script = """() => {
+                const result = [];
+                const containers = document.querySelectorAll('[id]');
+                containers.forEach(c => {
+                    const id = c.id;
+                    if (!id) return;
+                    // heuristic: container is part of a cart item
+                    if (c.closest('[class*="Cart"]') || c.className.includes("DefaultProductCard__Container")) {
+                        let nameEl = c.querySelector('[class*="ProductTitle"], .cart-item-name, .product-name, [data-testid="cart-item-name"]');
+                        let name = nameEl ? nameEl.innerText.trim() : '';
+                        if (name) result.push({id, name});
+                    }
+                });
+                return result;
+            }"""
+            items = await self.order.page.evaluate(script)
+
+            for item in items:
+                name = item.get("name", "")
+                pid = item.get("id")
+                if expected_name and name:
+                    ratio = difflib.SequenceMatcher(None, (expected_name or "").lower(), name.lower()).ratio()
+                    if ratio < 0.90:
+                        logger.warning(f"[CLEANUP] Removing mismatched cart item '{name}' (id={pid}) ratio={ratio:.2f}")
+                        try:
+                            await self.order.remove_from_cart(pid, quantity=10)
+                            removed_ids.append(pid)
+                        except Exception as exc:
+                            logger.error(f"Failed to remove {pid}: {exc}")
+        except Exception as e:
+            logger.error(f"purge_wrong_cart_items error: {e}")
+        return removed_ids
+
     def write_status(self, status, details=None):
         """Write status to JSON file"""
         status_data = {
@@ -772,7 +824,19 @@ class ProductWatcher:
                 await asyncio.sleep(2)
                 logger.info("[OK] Cart opened")
             
-            logger.info("Step 3a: Verifying product in cart...")
+            # Clean up any previous items that don't match the current product
+            if self.expected_product_name or product_name:
+                logger.info("Step 3a: Cleaning cart of mismatched items...")
+                removed = await self.purge_wrong_cart_items(self.expected_product_name or product_name)
+                if removed:
+                    logger.info(f"[CLEANUP] Removed {len(removed)} mismatched item(s) from cart: {removed}")
+                    # give the cart a moment to settle and then re-open if necessary
+                    await asyncio.sleep(1)
+                    if await self.order.page.is_visible("text=My Cart"):
+                        await self.order.page.click("text=My Cart")
+                        await asyncio.sleep(1)
+
+            logger.info("Step 3b: Verifying product in cart...")
             # Extract product name from cart and verify it matches expected product
             cart_product_name = await self.get_cart_product_name(self.order.page)
             logger.info(f"[CART] Product in cart: {colorize_product(cart_product_name)}")
@@ -1143,9 +1207,57 @@ async def main():
                 break
 
 
+async def _run_quick_test():
+    """Minimal demonstration of cart cleanup logic without opening a browser."""
+    # build dummy watcher with fake order/page objects
+    class DummyPage:
+        def __init__(self):
+            self.url = ""
+        async def evaluate(self, script):
+            # ignore script, return simulated cart items
+            # first item is mismatched, second is correct
+            return [{"id": "wrong123", "name": "Some Other Product"},
+                    {"id": "good456", "name": "Expected Product"}]
+        async def is_visible(self, selector):
+            return False
+        async def click(self, selector):
+            pass
+
+    class DummyOrder:
+        def __init__(self):
+            self.page = DummyPage()
+        async def remove_from_cart(self, product_id, quantity=1):
+            print(f"[dummy] remove_from_cart called for {product_id} x{quantity}")
+
+    # construct watcher and call cleanup
+    watcher = ProductWatcher(
+        product_url="https://blinkit.com/prn/x/prid/TEST",
+        latitude=None,
+        longitude=None,
+        check_interval=30,
+        location_label="Home",
+        continue_on_out_of_stock=False,
+        telegram_bot_token=None,
+        telegram_channel_id=None,
+        automate_checkout=False,
+    )
+    watcher.order = DummyOrder()
+    watcher.expected_product_name = "Expected Product"
+    removed = await watcher.purge_wrong_cart_items(watcher.expected_product_name)
+    print("Removed items:", removed)
+
+
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
-        sys.exit(1)
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ("test", "quick", "auto"):
+        # run built-in quick test harness
+        try:
+            asyncio.run(_run_quick_test())
+        except Exception as e:
+            logger.error(f"Quick test failed: {e}", exc_info=True)
+            sys.exit(1)
+    else:
+        try:
+            asyncio.run(main())
+        except Exception as e:
+            logger.error(f"Fatal error: {e}", exc_info=True)
+            sys.exit(1)

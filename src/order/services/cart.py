@@ -155,7 +155,15 @@ class CartService(BaseService):
             print(f"Error removing from cart: {e}")
 
     async def get_cart_items(self):
-        """Checks items in the cart and returns the text content."""
+        """Returns a list of cart items currently visible in the cart drawer.
+
+        Each item is represented as a dict containing at least ``id`` and ``name``
+        keys. The method will open the cart if it's not already visible and then
+        execute a small script against the DOM to collect information from the
+        item containers. In error cases it will return an empty list so that callers
+        can safely use ``len()`` without having to check the type.
+        """
+        items = []
         try:
             cart_btn = self.page.locator(
                 "div[class*='CartButton__Button'], div[class*='CartButton__Container']"
@@ -164,54 +172,44 @@ class CartService(BaseService):
             if await cart_btn.count() > 0:
                 await cart_btn.first.click()
 
-                # Verify opening
-                try:
-                    await self.page.wait_for_timeout(2000)
+                # give drawer a moment to appear
+                await self.page.wait_for_timeout(2000)
 
-                    # 1. Critical Availability Check
-                    if (
-                        await self.page.is_visible("text=Sorry, can't take your order")
-                        or await self.page.is_visible("text=Currently unavailable")
-                        or await self.page.is_visible("text=High Demand")
-                    ):
-                        return "CRITICAL: Store is unavailable. 'Sorry, can't take your order'. Please try again later."
+                # quick availability checks; if the store is unavailable treat as empty
+                if (
+                    await self.page.is_visible("text=Sorry, can't take your order")
+                    or await self.page.is_visible("text=Currently unavailable")
+                    or await self.page.is_visible("text=High Demand")
+                ):
+                    return []
 
-                    # 2. Check for Bill Details or Proceed Button
-                    is_cart_active = (
-                        await self.page.is_visible("text=/Bill details/i")
-                        or await self.page.is_visible("button:has-text('Proceed')")
-                        or await self.page.is_visible("text=ordering for")
-                    )
+                if await self._is_store_closed():
+                    return []
 
-                    if await self._is_store_closed():
-                        return "CRITICAL: Store is closed."
+                # scrape item entries from the cart drawer
+                script = """() => {
+                    const results = [];
+                    const containers = document.querySelectorAll('[id]');
+                    containers.forEach(c => {
+                        const id = c.id;
+                        if (!id) return;
+                        // heuristics: only consider containers that look like cart items
+                        if (c.closest('[class*="Cart"]') || c.className.includes("DefaultProductCard__Container")) {
+                            let nameEl = c.querySelector('[class*="ProductTitle"], .cart-item-name, .product-name, [data-testid="cart-item-name"]');
+                            let name = nameEl ? nameEl.innerText.trim() : '';
+                            if (name) {
+                                results.push({id, name});
+                            }
+                        }
+                    });
+                    return results;
+                }"""
+                parsed = await self.page.evaluate(script)
+                if isinstance(parsed, list):
+                    items = parsed
 
-                    # Scrape content
-                    drawer = self.page.locator(
-                        "div[class*='CartDrawer'], div[class*='CartSidebar'], div.cart-modal-rn, div[class*='CartWrapper__CartContainer']"
-                    ).first
-
-                    if await drawer.count() > 0:
-                        content = await drawer.inner_text()
-                        if (
-                            "Currently unavailable" in content
-                            or "can't take your order" in content
-                        ):
-                            return "CRITICAL: Store is unavailable (Text detected in cart). Please try again later."
-                        print(
-                            "You can select address, or checkout, if you want to place the order."
-                        )
-                        return content
-
-                    if is_cart_active:
-                        return "Cart is open. (Could not scrape specific drawer content, but functionality is active)."
-                    else:
-                        return "WARNING: Cart opened but seems empty or store is unavailable (No bill details/proceed button found)."
-
-                except Exception as e:
-                    return f"Cart drawer checking timed out or error: {e}"
-            else:
-                return "Cart button not found."
-
+            # return list (possibly empty) so callers can use len()
+            return items
         except Exception as e:
-            return f"Error getting cart items: {e}"
+            print(f"Error getting cart items: {e}")
+            return []
