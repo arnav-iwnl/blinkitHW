@@ -2,6 +2,7 @@
 Telegram Bot Service
 - Send product availability notifications to Telegram channel
 - Poll for button click callbacks
+- Support inline buttons including Retry, Cancel, and an "Open Link" URL button
 """
 
 import logging
@@ -85,7 +86,13 @@ class TelegramBot:
         )
 
         if with_buttons:
-            result = await self.send_message_with_buttons(message)
+            # add an "Open Link" button that points to the product URL
+            buttons = {
+                "Open Link": {"url": product_url},
+                "Retry": "retry_watch",
+                "Cancel": "cancel_watch"
+            }
+            result = await self.send_message_with_buttons(message, buttons)
         else:
             result = await self.send_message(message)
         
@@ -113,13 +120,17 @@ class TelegramBot:
         try:
             url = f"{self.base_url}/sendMessage"
             
-            # Build inline keyboard
+            # Build inline keyboard - supports callback and URL buttons
             inline_keyboard = []
-            for label, callback_data in buttons.items():
-                inline_keyboard.append({
-                    "text": label,
-                    "callback_data": callback_data
-                })
+            for label, data in buttons.items():
+                # data can be a simple callback string or a dict specifying url/callback_data
+                if isinstance(data, dict):
+                    button = {"text": label}
+                    # merge provided dict (e.g. {'url': product_url})
+                    button.update(data)
+                else:
+                    button = {"text": label, "callback_data": data}
+                inline_keyboard.append(button)
             
             payload = {
                 "chat_id": self.channel_id,
