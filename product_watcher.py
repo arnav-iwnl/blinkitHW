@@ -8,6 +8,7 @@ Simple Product Watcher
 import asyncio
 import json
 import logging
+import re
 import sys
 import os
 import difflib
@@ -407,58 +408,196 @@ class ProductWatcher:
         
         return "Unknown"
 
+ 
+
+    @staticmethod
+    def _name_similarity(a: str, b: str) -> float:
+        """Simple token-overlap similarity — no external deps needed.
+        Strips weight suffixes (100g, 1kg, 500ml…) before comparing.
+        """
+        import re
+
+        def normalize(s):
+            s = s.lower()
+            s = re.sub(r'\b\d+\s*(g|kg|ml|l|gm|ltr|pcs|pack)\b', '', s)
+            return set(re.findall(r'[a-z]+', s))
+
+        tokens_a = normalize(a)
+        tokens_b = normalize(b)
+        if not tokens_a or not tokens_b:
+            return 0.0
+        return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)  # Jaccard
+    # async def purge_wrong_cart_items(self, expected_name=None):
+    #     """Remove any cart items whose name does not match the expected product.
+
+    #     This method will open the cart if necessary, scrape the list of item ids
+    #     and titles, and then invoke the order service to remove anything that
+    #     looks like a mismatch (based on fuzzy similarity). It returns a list of
+    #     removed product ids for logging.
+    #     """
+    #     removed_ids = []
+    #     try:
+    #         # ensure cart is visible before scraping
+    #         if not await self.order.page.is_visible("text=My Cart"):
+    #             # try clicking cart button if not open
+    #             if await self.order.page.is_visible("div[class*='CartButton']"):
+    #                 await self.order.page.click("div[class*='CartButton']")
+    #                 await asyncio.sleep(1)
+
+    #         # gather id/name pairs from the cart DOM
+    #         script = """() => {
+    #             const result = [];
+    #             const containers = document.querySelectorAll('[id]');
+    #             containers.forEach(c => {
+    #                 const id = c.id;
+    #                 if (!id) return;
+    #                 // heuristic: container is part of a cart item
+    #                 if (c.closest('[class*="Cart"]') || String(c.className).includes("DefaultProductCard__Container")) {
+    #                     let nameEl = c.querySelector('[class*="ProductTitle"], .cart-item-name, .product-name, [data-testid="cart-item-name"]');
+    #                     let name = nameEl ? nameEl.innerText.trim() : '';
+    #                     if (name) result.push({id, name});
+    #                 }
+    #             });
+    #             return result;
+    #         }"""
+    #         items = await self.order.page.evaluate(script)
+
+    #         for item in items:
+    #             name = item.get("name", "")
+    #             pid = item.get("id")
+    #             if expected_name and name:
+    #                 # remove if name differs (case-insensitive)
+    #                 if name.strip().lower() != expected_name.strip().lower():
+    #                     logger.warning(f"[CLEANUP] Removing mismatched cart item '{name}' (id={pid}) expected '{expected_name}'")
+    #                     try:
+    #                         await self.order.remove_from_cart(pid, quantity=10)
+    #                         removed_ids.append(pid)
+    #                     except Exception as exc:
+    #                         logger.error(f"Failed to remove {pid}: {exc}")
+    #     except Exception as e:
+    #         logger.error(f"purge_wrong_cart_items error: {e}")
+    #     return removed_ids
 
     async def purge_wrong_cart_items(self, expected_name=None):
-        """Remove any cart items whose name does not match the expected product.
-
-        This method will open the cart if necessary, scrape the list of item ids
-        and titles, and then invoke the order service to remove anything that
-        looks like a mismatch (based on fuzzy similarity). It returns a list of
-        removed product ids for logging.
         """
-        removed_ids = []
+        Remove cart items that don't match expected_name.
+        Works without product IDs by clicking minus buttons directly
+        from the scraped DOM — matches actual Blinkit cart HTML structure.
+        """
+        removed_names = []
         try:
-            # ensure cart is visible before scraping
-            if not await self.order.page.is_visible("text=My Cart"):
-                # try clicking cart button if not open
-                if await self.order.page.is_visible("div[class*='CartButton']"):
-                    await self.order.page.click("div[class*='CartButton']")
+        # --- 1. Ensure cart panel is open ---
+            cart_open = await self.order.page.is_visible("text=My Cart")
+            if not cart_open:
+                cart_btn = self.order.page.locator("[class*='CartButton']").first
+                if await cart_btn.count() > 0:
+                    await cart_btn.click()
                     await asyncio.sleep(1)
 
-            # gather id/name pairs from the cart DOM
+        # --- 2. Scrape using ACTUAL Blinkit class names from your HTML ---
+        # No id-walking needed — grab name + qty directly from card structure
             script = """() => {
-                const result = [];
-                const containers = document.querySelectorAll('[id]');
-                containers.forEach(c => {
-                    const id = c.id;
-                    if (!id) return;
-                    // heuristic: container is part of a cart item
-                    if (c.closest('[class*="Cart"]') || String(c.className).includes("DefaultProductCard__Container")) {
-                        let nameEl = c.querySelector('[class*="ProductTitle"], .cart-item-name, .product-name, [data-testid="cart-item-name"]');
-                        let name = nameEl ? nameEl.innerText.trim() : '';
-                        if (name) result.push({id, name});
-                    }
-                });
-                return result;
-            }"""
-            items = await self.order.page.evaluate(script)
+            const results = [];
 
-            for item in items:
-                name = item.get("name", "")
-                pid = item.get("id")
-                if expected_name and name:
-                    # remove if name differs (case-insensitive)
-                    if name.strip().lower() != expected_name.strip().lower():
-                        logger.warning(f"[CLEANUP] Removing mismatched cart item '{name}' (id={pid}) expected '{expected_name}'")
-                        try:
-                            await self.order.remove_from_cart(pid, quantity=10)
-                            removed_ids.append(pid)
-                        except Exception as exc:
-                            logger.error(f"Failed to remove {pid}: {exc}")
+            // Each cart row is wrapped in CartProduct__Container
+            const cards = document.querySelectorAll(
+                '[class*="CartProduct__Container"]'
+            );
+
+            cards.forEach((card, index) => {
+                // Product title: DefaultProductCard__ProductTitle
+                const nameEl = card.querySelector('[class*="ProductTitle"]');
+                const name = nameEl ? nameEl.innerText.trim() : '';
+
+                // Quantity: the text node between the two AddToCart StyledDivs
+                // It sits as a direct text child inside UpdatedButtonContainer
+                const btnContainer = card.querySelector(
+                    '[class*="UpdatedButtonContainer"]'
+                );
+                let qty = 1;
+                if (btnContainer) {
+                    // childNodes includes raw text nodes — qty is the middle one
+                    const textNode = [...btnContainer.childNodes].find(
+                        n => n.nodeType === Node.TEXT_NODE && n.textContent.trim() !== ''
+                    );
+                    qty = textNode ? parseInt(textNode.textContent.trim(), 10) || 1 : 1;
+                }
+
+                if (name) results.push({ index, name, qty });
+            });
+
+            return results;
+        }"""
+
+            items = await self.order.page.evaluate(script)
+            logger.info(
+                f"[CLEANUP] Found {len(items)} cart item(s): {[i['name'] for i in items]}"
+            )
+
+            if not items:
+                logger.warning(
+                "[CLEANUP] No cart items found — selectors may need updating")
+                return removed_names
+
+        # --- 3. Iterate in REVERSE so index positions stay stable after removal ---
+            for item in reversed(items):
+                name = item.get("name", "").strip()
+                idx = item.get("index")
+                qty = item.get("qty", 1)
+
+                if not name:
+                    continue
+
+                similarity = self._name_similarity(name, expected_name or "")
+                is_match = similarity >= 0.6
+
+                if is_match:
+                    logger.info(
+                        f"[CLEANUP] Keeping  '{name}' (similarity={similarity:.2f})")
+                    continue
+
+                logger.warning(
+                f"[CLEANUP] Removing '{name}' "
+                f"(similarity={similarity:.2f}, qty={qty})"
+                )
+
+            # --- 4. Re-locate the card at this index and click minus qty times ---
+                try:
+                    cards_live = self.order.page.locator(
+                        '[class*="CartProduct__Container"]')
+                    card = cards_live.nth(idx)
+
+                # Minus button = first StyledDiv inside UpdatedButtonContainer
+                    minus_btn = card.locator(
+                        '[class*="UpdatedButtonContainer"] > [class*="StyledDiv"]').first
+
+                    if not await minus_btn.is_visible():
+                        logger.warning(
+                        f"[CLEANUP] Minus button not visible for '{name}', skipping")
+                        continue
+
+                    for _ in range(qty):
+                        await minus_btn.click()
+                        await asyncio.sleep(0.4)
+
+                    # Stop early if ADD button reappears (item fully removed)
+                        add_btn = card.locator(
+                            '[class*="UpdatedButtonContainer"]').filter(has_text="ADD")
+                        if await add_btn.count() > 0:
+                            break
+
+                    removed_names.append(name)
+                    logger.info(f"[CLEANUP] ✓ Removed '{name}'")
+                # let cart DOM settle before next removal
+                    await asyncio.sleep(0.5)
+
+                except Exception as exc:
+                    logger.error(f"[CLEANUP] ✗ Exception removing '{name}': {exc}")
+
         except Exception as e:
             logger.error(f"purge_wrong_cart_items error: {e}")
-        return removed_ids
 
+        return removed_names
     def write_status(self, status, details=None):
         """Write status to JSON file"""
         status_data = {
@@ -829,11 +968,12 @@ class ProductWatcher:
             # Clean up any previous items that don't match the product title
             logger.info("Step 3a: Cleaning cart of mismatched items...")
             removed = await self.purge_wrong_cart_items(product_name)
+            logger.info(f"[CLEANUP] Cart cleanup completed. Removed items: {removed if removed else 'None'}")
             if removed:
-                logger.info(f"[CLEANUP] Removed {len(removed)} mismatched item(s) from cart: {removed}")
+                    logger.info(f"[CLEANUP] Removed {len(removed)} mismatched item(s) from cart: {removed}")
                 # give the cart a moment to settle and then re-open if necessary
-                await asyncio.sleep(1)
-                if await self.order.page.is_visible("text=My Cart"):
+                    await asyncio.sleep(1)
+            if await self.order.page.is_visible("text=My Cart"):
                     await self.order.page.click("text=My Cart")
                     await asyncio.sleep(1)
 
@@ -843,12 +983,18 @@ class ProductWatcher:
             cart_product_name = normalize_product_name(cart_product_name_raw)
             logger.info(f"[CART] Product in cart: {colorize_product(cart_product_name)}")
             
+            if removed:
+                    logger.info(f"[CLEANUP] Removed {len(removed)} mismatched item(s) from cart: {removed}")
+                # give the cart a moment to settle and then re-open if necessary
+                    await asyncio.sleep(1)
             # verify cart item equals page product name
             if cart_product_name != "Unknown":
                 if cart_product_name.strip().lower() != product_name.strip().lower():
                     logger.warning(f"[MISMATCH] Cart product '{cart_product_name}' does not equal page product '{product_name}'")
+                    
                     # run cleanup again to clear whatever got added, then abort
-                    await self.purge_wrong_cart_items(product_name)
+                    removed =await self.purge_wrong_cart_items(product_name)
+                    logger.info(f"[CLEANUP] Post-mismatch cleanup completed. Removed items: {removed if removed else 'None'}")
                     return False
                 else:
                     logger.info("[OK] Cart product matches page product")
@@ -1126,15 +1272,15 @@ async def main():
 
     # Ask for check interval
     try:
-        check_interval = int(input("\nEnter check interval in seconds (default 30): ").strip() or "30")
+        check_interval = int(input("\nEnter check interval in seconds (default 5): ").strip() or "5")
     except ValueError:
-        check_interval = 30
+        check_interval = 5
 
     # Ask if user wants to keep monitoring even if product goes out of stock
-    continue_on_oos = input("\nContinue refreshing if product goes out of stock? (y/N): ").strip().lower() in ('y', 'yes')
+    continue_on_oos = input("\nContinue refreshing if product goes out of stock? (y/N): ").strip().lower() in ('y', 'yes') or "y"
 
     # Ask if user wants to automate checkout steps (ask once, applies to all retries)
-    automate_checkout = input("\nAutomate checkout steps (Proceed to Pay, Select Payment, Pay Now)? (y/N): ").strip().lower() in ('y', 'yes')
+    automate_checkout = input("\nAutomate checkout steps (Proceed to Pay, Select Payment, Pay Now)? (y/N): ").strip().lower() in ('y', 'yes') or "n"
 
     # Load Telegram credentials from environment variables
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -1179,7 +1325,7 @@ async def main():
             logger.info("\n[INFO] Watcher stopped.")
             
             # Check if Telegram Retry button was clicked
-            if watcher.telegram_retry_event.is_set():
+        if watcher.telegram_retry_event.is_set():
                 logger.info("[TELEGRAM] Retry button clicked - automatically restarting watch cycle")
                 retry_count += 1
                 logger.info(f"Restarting watch cycle (Retry #{retry_count})...")
@@ -1188,19 +1334,19 @@ async def main():
                 continue
             
             # Check if Telegram Cancel button was clicked
-            if watcher.telegram_cancel_event.is_set():
+        if watcher.telegram_cancel_event.is_set():
                 logger.info("[TELEGRAM] Cancel button clicked - exiting")
                 watcher.telegram_cancel_event.clear()
                 break
             
             # Otherwise, ask user if they want to retry (terminal fallback)
-            retry_choice = input("\nWould you like to retry watching this product? (y/N): ").strip().lower()
-            if retry_choice in ('y', 'yes'):
+        retry_choice = input("\nWould you like to retry watching this product? (y/N): ").strip().lower()
+        if retry_choice in ('y', 'yes'):
                 retry_count += 1
                 logger.info(f"Restarting watch cycle (Retry #{retry_count})...")
                 await asyncio.sleep(2)  # Brief pause before restart
                 continue
-            else:
+        else:
                 logger.info("User chose not to retry. Exiting.")
                 break
 
