@@ -31,7 +31,7 @@ def get_output_filename(output_format: str = "excel"):
     return Path(f"blinkit_products.{ext}")
 
 class ProductScraper:
-    def __init__(self, start_id=746500, end_id=747000, keyword_filter="hot wheels", output_format: str = "excel"):
+    def __init__(self, start_id=746500, end_id=747000, keyword_filter="hot wheels", output_format: str = "json"):
         """
         Initialize the product scraper
         
@@ -39,7 +39,7 @@ class ProductScraper:
             start_id: Starting product ID (default 70000)
             end_id: Ending product ID (default 79999)
             keyword_filter: Keyword to filter products (e.g., "hot wheels")
-            output_format: "excel" or "json" (default excel)
+            output_format: "excel" or "json" (default json)
         """
         self.start_id = start_id
         self.end_id = end_id
