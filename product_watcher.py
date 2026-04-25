@@ -594,6 +594,9 @@ class ProductWatcher:
                 except Exception as exc:
                     logger.error(f"[CLEANUP] ✗ Exception removing '{name}': {exc}")
 
+            # Wait for all removals to complete and DOM to stabilize
+            await asyncio.sleep(3)
+
         except Exception as e:
             logger.error(f"purge_wrong_cart_items error: {e}")
 
@@ -992,10 +995,24 @@ class ProductWatcher:
                 if cart_product_name.strip().lower() != product_name.strip().lower():
                     logger.warning(f"[MISMATCH] Cart product '{cart_product_name}' does not equal page product '{product_name}'")
                     
-                    # run cleanup again to clear whatever got added, then abort
-                    removed =await self.purge_wrong_cart_items(product_name)
-                    logger.info(f"[CLEANUP] Post-mismatch cleanup completed. Removed items: {removed if removed else 'None'}")
-                    return False
+                    # Try cleanup again
+                    removed = await self.purge_wrong_cart_items(product_name)
+                    logger.info(f"[CLEANUP] Post-mismatch cleanup completed. Removed items: {removed}")
+                    
+                    # Ensure cart is open for re-verification
+                    if not await self.order.page.is_visible("text=My Cart"):
+                        await self.order.page.click("text=My Cart")
+                        await asyncio.sleep(2)
+                    
+                    # Re-check after cleanup
+                    cart_product_name_raw = await self.get_cart_product_name(self.order.page)
+                    cart_product_name = normalize_product_name(cart_product_name_raw)
+                    logger.info(f"[CART] Product in cart after cleanup: {colorize_product(cart_product_name)}")
+                    
+                    if cart_product_name.strip().lower() != product_name.strip().lower():
+                        logger.warning("Auto-purchase failed. Manual intervention needed.")
+                        self.write_status("available", {"message": "Product added but cart contains wrong item after cleanup"})
+                        return False
                 else:
                     logger.info("[OK] Cart product matches page product")
             
