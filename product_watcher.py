@@ -26,6 +26,27 @@ if sys.platform == "win32":
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+banner = r"""
+
+
+
+
+
+
+
+██████╗ ██╗   ██╗██╗   ██╗    ████████╗██╗  ██╗ █████╗ ████████╗    ███████╗██╗  ██╗██╗████████╗    ██╗██╗
+██╔══██╗██║   ██║╚██╗ ██╔╝    ╚══██╔══╝██║  ██║██╔══██╗╚══██╔══╝    ██╔════╝██║  ██║██║╚══██╔══╝    ██║██║
+██████╔╝██║   ██║ ╚████╔╝        ██║   ███████║███████║   ██║       ███████╗███████║██║   ██║       ██║██║
+██╔══██╗██║   ██║  ╚██╔╝         ██║   ██╔══██║██╔══██║   ██║       ╚════██║██╔══██║██║   ██║       ╚═╝╚═╝
+██████╔╝╚██████╔╝   ██║          ██║   ██║  ██║██║  ██║   ██║       ███████║██║  ██║██║   ██║       ██╗██╗
+╚═════╝  ╚═════╝    ╚═╝          ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝       ╚══════╝╚═╝  ╚═╝╚═╝   ╚═╝       ╚═╝╚═╝
+                                                                                                          
+   
+   
+                                                                                                   
+"""
+
+
 from src.auth import BlinkitAuth
 from src.order.blinkit_order import BlinkitOrder
 from src.telegram.service import TelegramBot
@@ -734,7 +755,7 @@ class ProductWatcher:
                 logger.info(f"Using location: Latitude {self.latitude}, Longitude {self.longitude}")
             else:
                 logger.info("No coordinates provided — will select saved address via site UI (Home)")
-            self.auth = BlinkitAuth(headless=False) # Show browser
+            self.auth = BlinkitAuth(headless=True) # Show browser
             await self.auth.start_browser()
 
             # If coordinates not provided, try selecting saved 'Home' address via the location bar UI
@@ -1043,7 +1064,7 @@ class ProductWatcher:
             print("=" * 70)
             print(f"Product: {colorize_product(cart_product_name)}")
             print("=" * 70)
-            
+            print("\033[92m" + banner + "\033[0m")  # green
             # Check if user wants to automate checkout
             if not self.automate_checkout:
                 logger.info("[USER] Automate checkout disabled - waiting for manual completion or Telegram callback")
