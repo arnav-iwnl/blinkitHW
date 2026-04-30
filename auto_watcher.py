@@ -26,29 +26,12 @@ if sys.platform == "win32":
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-banner = r"""
-
-
-
-
-
-
-
-██████╗ ██╗   ██╗██╗   ██╗    ████████╗██╗  ██╗ █████╗ ████████╗    ███████╗██╗  ██╗██╗████████╗    ██╗██╗
-██╔══██╗██║   ██║╚██╗ ██╔╝    ╚══██╔══╝██║  ██║██╔══██╗╚══██╔══╝    ██╔════╝██║  ██║██║╚══██╔══╝    ██║██║
-██████╔╝██║   ██║ ╚████╔╝        ██║   ███████║███████║   ██║       ███████╗███████║██║   ██║       ██║██║
-██╔══██╗██║   ██║  ╚██╔╝         ██║   ██╔══██║██╔══██║   ██║       ╚════██║██╔══██║██║   ██║       ╚═╝╚═╝
-██████╔╝╚██████╔╝   ██║          ██║   ██║  ██║██║  ██║   ██║       ███████║██║  ██║██║   ██║       ██╗██╗
-╚═════╝  ╚═════╝    ╚═╝          ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝       ╚══════╝╚═╝  ╚═╝╚═╝   ╚═╝       ╚═╝╚═╝
-                                                                                                          
-   
-   
-                                                                                                   
-"""
+banner = r"""buy"""
 
 
 from src.auth import BlinkitAuth
 from src.order.blinkit_order import BlinkitOrder
+from src.order.services.checkout import CheckoutService
 from src.telegram.service import TelegramBot
 
 # Status file location
@@ -176,7 +159,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProductWatcher:
-    def __init__(self, product_url, latitude, longitude, check_interval=30, location_label="Home", continue_on_out_of_stock=True, telegram_bot_token=None, telegram_channel_id=None, automate_checkout=False):
+    def __init__(self, product_url, latitude, longitude, check_interval=30, location_label="Home", continue_on_out_of_stock=True, telegram_bot_token=None, telegram_channel_id=None, automate_checkout=False, preferred_payment="cash",quantity=1,use_telegram_callbacks=False):
         """
         Initialize the product watcher
         
@@ -206,7 +189,9 @@ class ProductWatcher:
         self.continue_on_out_of_stock = continue_on_out_of_stock
         # Automatically proceed with checkout steps
         self.automate_checkout = automate_checkout
-        
+        self.preferred_payment = preferred_payment.lower() 
+        self.quantity = max(1, int(quantity))
+        self.use_telegram_callbacks = use_telegram_callbacks
         # Telegram bot configuration
         self.telegram_bot = None
         if telegram_bot_token and telegram_channel_id:
@@ -448,56 +433,6 @@ class ProductWatcher:
         if not tokens_a or not tokens_b:
             return 0.0
         return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)  # Jaccard
-    # async def purge_wrong_cart_items(self, expected_name=None):
-    #     """Remove any cart items whose name does not match the expected product.
-
-    #     This method will open the cart if necessary, scrape the list of item ids
-    #     and titles, and then invoke the order service to remove anything that
-    #     looks like a mismatch (based on fuzzy similarity). It returns a list of
-    #     removed product ids for logging.
-    #     """
-    #     removed_ids = []
-    #     try:
-    #         # ensure cart is visible before scraping
-    #         if not await self.order.page.is_visible("text=My Cart"):
-    #             # try clicking cart button if not open
-    #             if await self.order.page.is_visible("div[class*='CartButton']"):
-    #                 await self.order.page.click("div[class*='CartButton']")
-    #                 await asyncio.sleep(1)
-
-    #         # gather id/name pairs from the cart DOM
-    #         script = """() => {
-    #             const result = [];
-    #             const containers = document.querySelectorAll('[id]');
-    #             containers.forEach(c => {
-    #                 const id = c.id;
-    #                 if (!id) return;
-    #                 // heuristic: container is part of a cart item
-    #                 if (c.closest('[class*="Cart"]') || String(c.className).includes("DefaultProductCard__Container")) {
-    #                     let nameEl = c.querySelector('[class*="ProductTitle"], .cart-item-name, .product-name, [data-testid="cart-item-name"]');
-    #                     let name = nameEl ? nameEl.innerText.trim() : '';
-    #                     if (name) result.push({id, name});
-    #                 }
-    #             });
-    #             return result;
-    #         }"""
-    #         items = await self.order.page.evaluate(script)
-
-    #         for item in items:
-    #             name = item.get("name", "")
-    #             pid = item.get("id")
-    #             if expected_name and name:
-    #                 # remove if name differs (case-insensitive)
-    #                 if name.strip().lower() != expected_name.strip().lower():
-    #                     logger.warning(f"[CLEANUP] Removing mismatched cart item '{name}' (id={pid}) expected '{expected_name}'")
-    #                     try:
-    #                         await self.order.remove_from_cart(pid, quantity=10)
-    #                         removed_ids.append(pid)
-    #                     except Exception as exc:
-    #                         logger.error(f"Failed to remove {pid}: {exc}")
-    #     except Exception as e:
-    #         logger.error(f"purge_wrong_cart_items error: {e}")
-    #     return removed_ids
 
     async def purge_wrong_cart_items(self, expected_name=None):
         """
@@ -610,18 +545,18 @@ class ProductWatcher:
                     removed_names.append(name)
                     logger.info(f"[CLEANUP] ✓ Removed '{name}'")
                 # let cart DOM settle before next removal
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(3)
 
                 except Exception as exc:
                     logger.error(f"[CLEANUP] ✗ Exception removing '{name}': {exc}")
 
-            # Wait for all removals to complete and DOM to stabilize
-            await asyncio.sleep(3)
+                
 
         except Exception as e:
             logger.error(f"purge_wrong_cart_items error: {e}")
 
         return removed_names
+    
     def write_status(self, status, details=None):
         """Write status to JSON file"""
         status_data = {
@@ -681,11 +616,12 @@ class ProductWatcher:
 
                 # Check for "Coming Soon" text
                 if await self.order.page.is_visible("text=Coming Soon"):
+    
                     coming_soon_status = "Coming Soon"
                 else:
                     coming_soon_status = "Available"
                     
-                logger.info(f"[STATUS] {coming_soon_status}")
+                logger.info(f"[STATUS] \033[93m{coming_soon_status}\033[0m")
                 
             except Exception as e:
                 logger.warning(f"Error extracting product details: {e}")
@@ -820,25 +756,45 @@ class ProductWatcher:
             logger.info("[OK] Logged in successfully")
             logger.info(f"[OK] Location set to: Lat {self.latitude}, Lon {self.longitude}")
             self.order = BlinkitOrder(self.auth.page)
-            
-            # Start Telegram polling if configured
             if self.telegram_bot:
                 logger.info("[TELEGRAM] Starting polling for button callbacks...")
-                
-                # Register callback handlers
-                async def on_retry():
-                    logger.info("[TELEGRAM] Retry button clicked - will restart watch after current action")
-                    self.telegram_retry_event.set()
-                
-                async def on_cancel():
-                    logger.info("[TELEGRAM] Cancel button clicked - stopping watch")
-                    self.telegram_cancel_event.set()
-                
-                self.telegram_bot.register_callback("retry_watch", on_retry)
-                self.telegram_bot.register_callback("cancel_watch", on_cancel)
-                
-                # Start polling in background
+
+                if self.use_telegram_callbacks:
+                    async def on_retry():
+                        logger.info("[TELEGRAM] Retry button clicked - will restart watch after current action")
+                        self.telegram_retry_event.set()
+
+                    async def on_cancel():
+                        logger.info("[TELEGRAM] Cancel button clicked - stopping watch")
+                        self.telegram_cancel_event.set()
+
+                    self.telegram_bot.register_callback("retry_watch", on_retry)
+                    self.telegram_bot.register_callback("cancel_watch", on_cancel)
+                    logger.info("[TELEGRAM] Retry/Cancel callbacks registered")
+                else:
+                 logger.info("[TELEGRAM] Retry/Cancel callbacks DISABLED by user")
+
                 self.telegram_bot.polling_task = asyncio.create_task(self.telegram_bot.start_polling())
+            
+            # Start Telegram polling if configured
+            # if self.telegram_bot:
+            #     logger.info("[TELEGRAM] Starting polling for button callbacks...")
+                
+            #     # Register callback handlers
+            #     async def on_retry():
+            #         logger.info("[TELEGRAM] Retry button clicked - will restart watch after current action")
+            #         self.telegram_retry_event.set()
+                
+            #     async def on_cancel():
+            #         logger.info("[TELEGRAM] Cancel button clicked - stopping watch")
+            #         self.telegram_cancel_event.set()
+                
+            #     self.telegram_bot.register_callback("retry_watch", on_retry)
+            #     self.telegram_bot.register_callback("cancel_watch", on_cancel)
+                
+            #     # Start polling in background
+            #     self.telegram_bot.polling_task = asyncio.create_task(self.telegram_bot.start_polling())
+            
             
         except Exception as e:
             logger.error(f"Failed to initialize: {e}")
@@ -853,7 +809,7 @@ class ProductWatcher:
         try:
             while True:
                 # Check if cancel was requested via Telegram button
-                if self.telegram_cancel_event.is_set():
+                if self.use_telegram_callbacks and self.telegram_cancel_event.is_set():
                     logger.info("[TELEGRAM] Cancel requested - stopping watch")
                     self.write_status("stopped", {"reason": "Cancelled via Telegram"})
                     return False
@@ -950,10 +906,10 @@ class ProductWatcher:
             logger.info("Step 1: Verifying product details before adding to cart...")
             
             # Check if telegram bot is configured
-            if self.telegram_bot:
-                logger.info(f"[INFO] Telegram bot is configured and ready")
-            else:
-                logger.info(f"[INFO] Telegram bot is NOT configured")
+            # if self.telegram_bot:
+            #     logger.info(f"[INFO] Telegram bot is configured and ready")
+            # else:
+            #     logger.info(f"[INFO] Telegram bot is NOT configured")
             
             # product name from page will be our expected value
             raw_name = await self.get_product_title(self.order.page)
@@ -981,6 +937,8 @@ class ProductWatcher:
             if not clicked:
                 logger.error("ADD button not found with known selectors")
                 return False
+            
+            
             
             logger.info("Step 3: Opening cart...")
             # Navigate to cart or open cart drawer
@@ -1012,6 +970,41 @@ class ProductWatcher:
                 # give the cart a moment to settle and then re-open if necessary
                     await asyncio.sleep(1)
             # verify cart item equals page product name
+            if self.quantity > 1:
+                await asyncio.sleep(2)
+                logger.info(f"[QTY] Incrementing quantity to {self.quantity} inside cart...")
+                for i in range(self.quantity - 1):
+                    try:
+                        # Find the cart item card
+                        card = self.order.page.locator('[class*="CartProduct__Container"]').first
+
+                        # + button = last StyledDiv inside UpdatedButtonContainer (same as purge logic)
+                        plus_btn = card.locator(
+                            '[class*="UpdatedButtonContainer"] > [class*="StyledDiv"]'
+                        ).last
+
+                        if await plus_btn.is_visible():
+                            await plus_btn.click()
+                            await asyncio.sleep(0.5)
+                            logger.info(f"[QTY] Incremented to {i + 2}/{self.quantity}")
+                        else:
+                            logger.warning(f"[QTY] + button not visible — stopped at {i + 1}")
+                            break
+
+                        # Check if limit reached
+                        limit_msg = self.order.page.get_by_text("Sorry, you can't add more of this item")
+                        try:
+                            if await limit_msg.is_visible(timeout=500):
+                                logger.warning(f"[QTY] Quantity limit reached at {i + 1}")
+                                break
+                        except Exception:
+                            pass
+
+                    except Exception as e:
+                        logger.error(f"[QTY] Error incrementing quantity: {e}")
+                        break
+
+                logger.info(f"[QTY] Done — final quantity: {self.quantity}")
             if cart_product_name != "Unknown":
                 if cart_product_name.strip().lower() != product_name.strip().lower():
                     logger.warning(f"[MISMATCH] Cart product '{cart_product_name}' does not equal page product '{product_name}'")
@@ -1047,7 +1040,7 @@ class ProductWatcher:
                         product_name=product_name,
                         product_url=self.product_url,
                         location_name=self.location_label,
-                        with_buttons=True
+                        with_buttons=self.use_telegram_callbacks
                     )
                     
                     if telegram_success:
@@ -1080,196 +1073,80 @@ class ProductWatcher:
                 
                 # Wait for Telegram callbacks (retry or cancel)
                 # Check every 5 seconds for Telegram events
-                max_wait_time = 600  # 10 minutes max wait
-                elapsed = 0
+                if self.use_telegram_callbacks:
+                 max_wait_time = 600  # 10 minutes max wait
+                 elapsed = 0
                 
-                while elapsed < max_wait_time:
+                 while elapsed < max_wait_time:
                     # Check if user clicked Retry button
-                    if self.telegram_retry_event.is_set():
+                    if self.use_telegram_callbacks and self.telegram_retry_event.is_set():
                         logger.info("[TELEGRAM] Retry button clicked - restarting watch")
                         return False
                     
                     # Check if user clicked Cancel button
-                    if self.telegram_cancel_event.is_set():
+                    if self.use_telegram_callbacks and self.telegram_cancel_event.is_set():
                         logger.info("[TELEGRAM] Cancel button clicked - stopping watch")
                         return False
-                    
                     await asyncio.sleep(5)
                     elapsed += 5
-                
-                logger.info("[INFO] Max wait time reached - assuming manual payment completion")
+                else:
+                    logger.info("[INFO] Telegram callbacks disabled — not waiting for Retry/Cancel")
                 return True
+
             
             logger.info("[USER] Proceeding with automated checkout steps")
             
-            logger.info("Step 4: Clicking on cart button to open cart drawer...")
-            # Click on the cart button with class CartButton__Container-sc-1fuy2nj-3 eOczDn
-            cart_button_selectors = [
-                ".CartButton__Container-sc-1fuy2nj-3",
-                "[class*='CartButton__Container']",
-                "button[class*='CartButton']"
-            ]
-            
-            cart_button_clicked = False
-            for sel in cart_button_selectors:
-                try:
-                    if await self.order.page.is_visible(sel):
-                        await self.order.page.click(sel)
-                        await asyncio.sleep(2)
-                        logger.info(f"[OK] Clicked cart button: {sel}")
-                        cart_button_clicked = True
-                        break
-                except Exception as e:
-                    logger.debug(f"Cart button selector {sel} failed: {e}")
-                    continue
-            
-            if not cart_button_clicked:
-                logger.warning("Could not click cart button")
-            
-            # Check for Telegram retry/cancel interrupts
-            if self.telegram_cancel_event.is_set():
-                logger.info("[TELEGRAM] Cancel requested - stopping checkout")
-                return False
-            if self.telegram_retry_event.is_set():
-                logger.info("[TELEGRAM] Retry requested - aborting checkout")
-                return False
-            
-            logger.info("Step 5: Clicking Proceed to pay button to go to checkout...")
-            
-            # Scroll down to ensure the Proceed to pay button is visible
-            try:
-                await self.order.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await asyncio.sleep(1)
-                logger.info("[OK] Scrolled to bottom of page")
-            except Exception as e:
-                logger.debug(f"Scroll failed: {e}")
-            
-            # Click "Proceed to pay" button which redirects to checkout
-            # Try various selectors for the button
-            proceed_to_pay_selectors = [
-                "button:has-text('Proceed to Pay')",
-            ]
+            # ----------------------------------------------------------------
+            # Step 4+5: Open cart drawer → click Proceed to Pay
+            # ----------------------------------------------------------------
+            logger.info("Step 4+5: Opening cart and proceeding to pay via CheckoutService...")
+            checkout = CheckoutService(self.order.page)  # ← must be checkout, NOT self.order
+            await checkout.place_order()
+            logger.info("[CHECKOUT] place_order done — now on payment page")
 
-            proceed_clicked = False
-            for sel in proceed_to_pay_selectors:
-                try:
-                    if await self.order.page.is_visible(sel):
-                        # Scroll the element into view before clicking
-                        await self.order.page.locator(sel).first.scroll_into_view_if_needed()
-                        await asyncio.sleep(0.5)
-                        await self.order.page.click(sel)
-                        await asyncio.sleep(3)
-                        logger.info(f"[OK] Clicked: {sel}")
-                        proceed_clicked = True
-                        break
-                except Exception as e:
-                    logger.debug(f"Selector {sel} failed: {e}")
-                    continue
-
-            if not proceed_clicked:
-                logger.warning("Could not click Proceed to pay button - trying to find all buttons on page")
-                # Try to find any button with payment-related text
-                try:
-                    all_buttons = await self.order.page.query_selector_all("button")
-                    logger.info(f"[DEBUG] Found {len(all_buttons)} buttons on page")
-                    for i, btn in enumerate(all_buttons):
-                        btn_text = await btn.text_content()
-                        logger.info(f"[DEBUG] Button {i}: {btn_text}")
-                except Exception as e:
-                    logger.debug(f"Could not enumerate buttons: {e}")
-
-            # Wait for redirect and ensure we're on checkout page
-            await asyncio.sleep(2)
-            current_url = self.order.page.url
-            logger.info(f"Current page URL: {current_url}")
-            
-            # Check for Telegram retry/cancel interrupts before payment
-            if self.telegram_cancel_event.is_set():
-                logger.info("[TELEGRAM] Cancel requested - stopping before payment")
+            if self.use_telegram_callbacks and self.telegram_cancel_event.is_set():
                 return False
-            if self.telegram_retry_event.is_set():
-                logger.info("[TELEGRAM] Retry requested - aborting checkout before payment")
+            if self.use_telegram_callbacks and self.telegram_retry_event.is_set():
                 return False
 
-            logger.info("Step 6: Selecting Cash payment method...")
-            # Try common selectors for Cash / COD payment option
-            # Based on HTML: <div role="button" aria-label="Cash" title="Cash">
-            cash_selectors = [
-                "[aria-label='Cash']",
-                "div[role='button'][aria-label='Cash']",
-                "[title='Cash']",
-                "h5:has-text('Cash')",
-                "text=Cash",
-                "[class*='cod']",
-                "[class*='cash']"
-            ]
+            # ----------------------------------------------------------------
+            # Step 6: Select payment method based on user preference
+            # ----------------------------------------------------------------
+            logger.info(f"Step 6: Selecting payment method: {self.preferred_payment.upper()}...")
 
-            cash_clicked = False
-            for sel in cash_selectors:
-                try:
-                    if await self.order.page.is_visible(sel):
-                        await self.order.page.click(sel)
-                        await asyncio.sleep(1)
-                        logger.info(f"[OK] Selected payment option: {sel}")
-                        cash_clicked = True
-                        break
-                except Exception as e:
-                    logger.debug(f"Cash selector {sel} failed: {e}")
-                    continue
-
-            if not cash_clicked:
-                logger.warning("Could not automatically select Cash payment option")
-            
-            # Check for Telegram retry/cancel interrupts before final payment
-            if self.telegram_cancel_event.is_set():
-                logger.info("[TELEGRAM] Cancel requested - stopping before paying")
-                return False
-            if self.telegram_retry_event.is_set():
-                logger.info("[TELEGRAM] Retry requested - aborting before payment")
-                return False
-
-            logger.info("Step 7: Clicking Pay Now button...")
-            # Try to click Pay Now / Pay now button
-            pay_selectors = [
-                "button:has-text('Pay Now')",
-                "button:has-text('Pay now')",
-                "text=Pay Now",
-                "text=Pay now",
-                "button:has-text('Place Order')",
-                "text=Place Order"
-            ]
-
-            pay_clicked = False
-            for sel in pay_selectors:
-                try:
-                    if await self.order.page.is_visible(sel):
-                        await self.order.page.click(sel)
-                        await asyncio.sleep(2)
-                        logger.info(f"[OK] Clicked payment button: {sel}")
-                        pay_clicked = True
-                        break
-                except Exception:
-                    continue
-
-            if not pay_clicked:
-                logger.warning("Pay button not found — please complete payment manually on the checkout page")
-                # Give user some time to complete manual payment, but check for Telegram interrupts every 5 seconds
-                logger.info("Waiting 120 seconds for you to complete payment manually...")
-                for wait_iteration in range(24):  # 24 * 5 = 120 seconds
-                    # Check for Telegram retry/cancel before continuing wait
-                    if self.telegram_cancel_event.is_set():
-                        logger.info("[TELEGRAM] Cancel requested - stopping during manual payment wait")
-                        return False
-                    if self.telegram_retry_event.is_set():
-                        logger.info("[TELEGRAM] Retry requested - aborting manual payment wait")
-                        return False
-                    
-                    await asyncio.sleep(5)  # Wait 5 seconds before next check
+            if self.preferred_payment == "upi":
+                payment_result = await checkout.select_upi_payment()
             else:
-                logger.info("Payment button clicked; waiting briefly for confirmation...")
-                await asyncio.sleep(5)
+                payment_result = await checkout.select_cash_payment()
 
-            logger.info("[SUCCESS] Checkout steps attempted/completed")
+            logger.info(f"[CHECKOUT] Payment selection result: {payment_result}")
+
+            if self.use_telegram_callbacks and self.telegram_cancel_event.is_set():
+                return False
+            if self.use_telegram_callbacks and self.telegram_retry_event.is_set():
+                return False
+
+            # ----------------------------------------------------------------
+            # Step 7: Click Pay Now
+            # ----------------------------------------------------------------
+            logger.info("Step 7: Clicking Pay Now via CheckoutService...")
+            pay_result = await checkout.click_pay_now()
+            logger.info(f"[CHECKOUT] click_pay_now result: {pay_result}")
+
+            if "Could not find" in str(pay_result) or "Error" in str(pay_result):
+                logger.warning("Pay Now could not be clicked — waiting up to 120s for manual completion...")
+                for _ in range(12):
+                    if self.use_telegram_callbacks and self.telegram_cancel_event.is_set():
+                        logger.info("[TELEGRAM] Cancel during manual payment wait")
+                        return False
+                    if self.use_telegram_callbacks and self.telegram_retry_event.is_set():
+                        logger.info("[TELEGRAM] Retry during manual payment wait")
+                        return False
+                    await asyncio.sleep(2)
+            else:
+                await asyncio.sleep(2)
+
+            logger.info("[SUCCESS] Checkout steps completed")
             return True
             
         except Exception as e:
@@ -1313,12 +1190,25 @@ async def main():
         check_interval = int(input("\nEnter check interval in seconds (default 5): ").strip() or "5")
     except ValueError:
         check_interval = 5
+    try:
+        quantity = int(input("\nEnter quantity (default 1): ").strip() or "1")
+    except ValueError:
+        quantity = 1
+        
+    
 
+        
     # Ask if user wants to keep monitoring even if product goes out of stock
     continue_on_oos = input("\nContinue refreshing if product goes out of stock? (y/N): ").strip().lower() in ('y', 'yes') or "y"
 
     # Ask if user wants to automate checkout steps (ask once, applies to all retries)
-    automate_checkout = input("\nAutomate checkout steps (Proceed to Pay, Select Payment, Pay Now)? (y/N): ").strip().lower() in ('y', 'yes') or "n"
+    automate_checkout = input("\nAutomate checkout steps (Proceed to Pay, Select Payment, Pay Now)? (y/N): ").strip().lower() in ('y', 'yes')
+    preferred_payment = "cash"
+    if automate_checkout:
+        pay_choice = input("\nPreferred payment method? (cash/upi, default 'cash'): ").strip().lower()
+        if pay_choice in ("upi", "cash"):
+            preferred_payment = pay_choice
+        logger.info(f"Payment method: {preferred_payment.upper()}")
 
     # Load Telegram credentials from environment variables
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -1329,7 +1219,10 @@ async def main():
     logger.info(f"Check interval: {check_interval} seconds")
     logger.info(f"Continue on out-of-stock: {'YES - will keep refreshing' if continue_on_oos else 'NO - will stop'}")
     logger.info(f"Automate checkout: {'YES - will auto proceed through checkout' if automate_checkout else 'NO - will stop after adding to cart'}")
+    
     if telegram_bot_token and telegram_channel_id:
+        use_telegram_callbacks = input("\nEnable Telegram Retry/Cancel buttons? (y/N): ").strip().lower() in ('y', 'yes')
+        logger.info(f"Telegram callbacks: {'ENABLED' if use_telegram_callbacks else 'DISABLED (notify only)'}")
         logger.info(f"Telegram notifications: ENABLED (Channel: {telegram_channel_id})")
     else:
         logger.info("Telegram notifications: DISABLED (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID in .env)")
@@ -1352,7 +1245,10 @@ async def main():
             continue_on_oos,
             telegram_bot_token=telegram_bot_token,
             telegram_channel_id=telegram_channel_id,
-            automate_checkout=automate_checkout
+            automate_checkout=automate_checkout,
+            preferred_payment=preferred_payment,
+            quantity=quantity,
+            use_telegram_callbacks=use_telegram_callbacks,
         )
         success = await watcher.watch(max_checks=None)  # Infinite checks
         
@@ -1378,15 +1274,11 @@ async def main():
                 break
             
             # Otherwise, ask user if they want to retry (terminal fallback)
-        retry_choice = input("\nWould you like to retry watching this product? (y/N): ").strip().lower()
-        if retry_choice in ('y', 'yes'):
-                retry_count += 1
-                logger.info(f"Restarting watch cycle (Retry #{retry_count})...")
-                await asyncio.sleep(2)  # Brief pause before restart
-                continue
-        else:
-                logger.info("User chose not to retry. Exiting.")
-                break
+        retry_count += 1
+        logger.info(f"Restarting watch cycle (Retry #{retry_count})...")
+        await asyncio.sleep(2)  # Brief pause before restart
+        continue
+        
 
 
 async def _run_quick_test():

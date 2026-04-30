@@ -101,60 +101,6 @@ class CartService(BaseService):
         except Exception as e:
             print(f"Error adding to cart: {e}")
 
-    # async def remove_from_cart(self, product_id: str, quantity: int = 1):
-    #     """Removes a specific quantity of a product from the cart."""
-    #     print(f"Removing {quantity} of product ID {product_id} from cart...")
-    #     print(product_id)
-    #     try:
-    #         # Target the specific card by ID
-    #         card = self.page.locator(f"div[id='{product_id}']")
-
-    #         if await card.count() == 0:
-    #             # Attempt recovery via search if known
-    #             if self.manager and product_id in self.manager.known_products:
-    #                 product_info = self.manager.known_products[product_id]
-    #                 source_query = product_info.get("source_query")
-    #                 if source_query:
-    #                     if hasattr(self.manager, "search_product"):
-    #                         await self.manager.search_product(source_query)
-    #                     card = self.page.locator(f"div[id='{product_id}']")
-    #                     if await card.count() == 0:
-    #                         print(
-    #                             f"Product {product_id} not found after recovery search."
-    #                         )
-    #                         return
-    #             else:
-    #                 print(f"Product ID {product_id} not found and unknown.")
-    #                 return
-
-    #         # Check for decrement button
-    #         minus_btn = card.locator(".icon-minus").first
-    #         if await minus_btn.count() > 0:
-    #             minus_btn = minus_btn.locator("..")
-    #         else:
-    #             minus_btn = card.locator("text='-'").first
-
-    #         if await minus_btn.is_visible():
-    #             for i in range(quantity):
-    #                 await minus_btn.click()
-    #                 print(
-    #                     f"Decrementing quantity for {product_id} ({i + 1}/{quantity})."
-    #                 )
-    #                 await self.page.wait_for_timeout(500)
-
-    #                 # If ADD button reappears, item is fully removed
-    #                 if (
-    #                     await card.locator("div")
-    #                     .filter(has_text="ADD")
-    #                     .last.is_visible()
-    #                 ):
-    #                     print(f"Item {product_id} completely removed from cart.")
-    #                     break
-    #         else:
-    #             print(f"Item {product_id} is not in cart (no '-' button found).")
-
-    #     except Exception as e:
-    #         print(f"Error removing from cart: {e}")
     async def remove_from_cart(self, product_id: str, quantity: int = 1) -> dict:
         """Removes a specific quantity of a product from the cart.
         Returns a dict with 'product_id', 'success', and 'message'.
