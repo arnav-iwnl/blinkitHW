@@ -691,7 +691,7 @@ class ProductWatcher:
                 logger.info(f"Using location: Latitude {self.latitude}, Longitude {self.longitude}")
             else:
                 logger.info("No coordinates provided — will select saved address via site UI (Home)")
-            self.auth = BlinkitAuth(headless=False) # Show browser
+            self.auth = BlinkitAuth(headless=True) # Show browser
             await self.auth.start_browser()
 
             # If coordinates not provided, try selecting saved 'Home' address via the location bar UI
@@ -1116,10 +1116,37 @@ class ProductWatcher:
 
             if self.preferred_payment == "upi":
                 payment_result = await checkout.select_upi_payment()
+                # After:
+                logger.info(f"[CHECKOUT] Payment selection result: {payment_result}")
+                # Debug every condition
+                logger.info(f"[NOTIFY] telegram_bot set: {self.telegram_bot is not None}")
+                logger.info(f"[NOTIFY] payment_result is dict: {isinstance(payment_result, dict)}")
+                logger.info(f"[NOTIFY] upi_url present: {payment_result.get('upi_url') if isinstance(payment_result, dict) else f'NOT FOUND'}")
+                logger.info(f"[NOTIFY] amount present: {payment_result.get('amount') if isinstance(payment_result, dict) else f'Found'}")
+
+
+                # Send Telegram UPI payment notification if data is available
+                if (
+                    self.telegram_bot
+                    and isinstance(payment_result, dict)
+                    and payment_result.get("upi_url")
+                    and payment_result.get("amount")
+                ):
+                    logger.info("[NOTIFY] Sending UPI payment notification...")
+                    success = await self.telegram_bot.send_upi_payment_notification(
+                        product_name=self.expected_product_name or "Unknown Product",
+                        product_url=self.product_url,
+                        quantity=self.quantity,
+                        amount=payment_result["amount"],
+                        upi_url=payment_result["upi_url"],
+                        location_name=self.location_label,
+                    )   
+                    logger.info(f"[NOTIFY] Notification sent: {success}")
+                else:
+                    logger.warning("[NOTIFY] Skipped — one or more conditions failed (see above)")
             else:
                 payment_result = await checkout.select_cash_payment()
-
-            logger.info(f"[CHECKOUT] Payment selection result: {payment_result}")
+                logger.info(f"[CHECKOUT] Payment selection result: {payment_result}")
 
             if self.use_telegram_callbacks and self.telegram_cancel_event.is_set():
                 return False
@@ -1134,15 +1161,20 @@ class ProductWatcher:
             logger.info(f"[CHECKOUT] click_pay_now result: {pay_result}")
 
             if "Could not find" in str(pay_result) or "Error" in str(pay_result):
-                logger.warning("Pay Now could not be clicked — waiting up to 120s for manual completion...")
-                for _ in range(12):
+                max_wait_seconds = 600   # ← change this to whatever you want
+                interval = 10
+
+                logger.warning(f"Pay Now could not be clicked — waiting up to {max_wait_seconds}s for manual completion...")
+                for elapsed in range(0, max_wait_seconds, interval):
                     if self.use_telegram_callbacks and self.telegram_cancel_event.is_set():
                         logger.info("[TELEGRAM] Cancel during manual payment wait")
                         return False
                     if self.use_telegram_callbacks and self.telegram_retry_event.is_set():
                         logger.info("[TELEGRAM] Retry during manual payment wait")
                         return False
-                    await asyncio.sleep(2)
+                    remaining = max_wait_seconds - elapsed
+                    logger.info(f"[WAIT] {elapsed}s elapsed, {remaining}s remaining...")
+                    await asyncio.sleep(interval)
             else:
                 await asyncio.sleep(2)
 

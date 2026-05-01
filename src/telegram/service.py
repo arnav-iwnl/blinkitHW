@@ -8,6 +8,8 @@ Telegram Bot Service
 import logging
 import aiohttp
 import asyncio
+import os
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +33,14 @@ class TelegramBot:
         self.polling_task = None
         self.is_polling = False
     
-    async def send_message(self, message: str, parse_mode: str = "HTML") -> bool:
+    async def send_message(self, message: str, parse_mode: str = "HTML", reply_markup: dict = None) -> bool:
         """
         Send a text message to the Telegram channel
         
         Args:
             message: Message text (supports HTML formatting)
             parse_mode: HTML or Markdown formatting
+            reply_markup: Inline keyboard markup for buttons
         
         Returns:
             True if successful, False otherwise
@@ -49,6 +52,10 @@ class TelegramBot:
                 "text": message,
                 "parse_mode": parse_mode
             }
+            
+            if reply_markup:
+                payload["reply_markup"] = reply_markup  # ← only added when provided
+            
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload) as response:
@@ -152,8 +159,8 @@ class TelegramBot:
                         return False
         except Exception as e:
             logger.error(f"Telegram error: {e}")
-            return False
-    
+            return False      
+            
     def register_callback(self, callback_data: str, handler_func):
         """
         Register a callback handler for button clicks
@@ -284,3 +291,39 @@ class TelegramBot:
         if self.polling_task:
             self.polling_task.cancel()
         logger.info("[TELEGRAM] Stopped polling for button callbacks")
+    
+    async def send_upi_payment_notification(
+    self,
+    product_name: str,
+    product_url: str,
+    quantity: int,
+    amount: str,
+    upi_url: str,
+    location_name: str = "Home",
+) -> bool:
+        """Send a Telegram notification with payment details and a Pay Now button."""
+        message = (
+            f"💳 <b>Payment Ready — Complete Your Order</b>\n\n"
+            f"📦 <b>Product:</b> {product_name}\n"
+            f"🔢 <b>Quantity:</b> {quantity}\n"
+            f"💰 <b>Total Amount:</b> ₹{amount}\n"
+            f"📍 <b>Location:</b> {location_name}\n\n"
+            f"<a href=\"{product_url}\">Open on Blinkit</a>\n\n"
+            f"Tap *Pay Now* below to complete payment via UPI."
+        )
+        reply_markup = None
+        redirect_base = os.getenv("UPI_REDIRECT_BASE")
+        print(f"Preparing UPI payment notification with redirect base: {redirect_base}")
+        if redirect_base:
+             pay_link = f"{redirect_base}?url={quote(upi_url, safe='')}"
+             reply_markup = {
+            "inline_keyboard": [[
+                {"text": "💸 Pay Now", "url": pay_link}
+            ]]
+        }
+        else:
+            # Fallback: tap-to-copy in message
+            message += f"\n\n💸 <b>UPI Link:</b>\n<code>{upi_url}</code>"
+
+        return await self.send_message(message, parse_mode="HTML", reply_markup=reply_markup)
+        
