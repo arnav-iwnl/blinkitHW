@@ -674,17 +674,19 @@ class ProductWatcher:
 
         inventory_data = {}
 
-        async def fetch_inventory():
-            try:
-                response = await self.order.page.wait_for_response(
-                    lambda r: "/v1/layout/product/" in r.url and r.status == 200,
-                    timeout=15000
+        try:
+            async with self.order.page.expect_response(
+                lambda r: "/v1/layout/product/" in r.url and r.status == 200,
+                timeout=15000
+            ) as response_info:
+                await self.order.page.goto(
+                    self.product_url, wait_until="domcontentloaded", timeout=30000
                 )
-                body = await response.body()
-                if not body:
-                    logger.warning("[INVENTORY] Empty body received")
-                    return
 
+            response = await response_info.value
+            body = await response.body()
+
+            if body:
                 data = json.loads(body.decode("utf-8", errors="ignore"))
                 snippets = data.get("response", {}).get("snippets", [])
                 for snippet in snippets:
@@ -701,19 +703,11 @@ class ProductWatcher:
                             f"₹{inventory_data['price']}"
                         )
                         break
-            except asyncio.TimeoutError:
-                logger.warning("[INVENTORY] wait_for_response timed out — no API call detected")
-            except Exception as e:
-                logger.warning(f"[INVENTORY] fetch_inventory error: {e}")
 
-        # ── Run navigation and inventory fetch concurrently ──
-        try:
-            await asyncio.gather(
-                self.order.page.goto(self.product_url, wait_until="domcontentloaded", timeout=30000),
-                fetch_inventory()
-            )
+        except asyncio.TimeoutError:
+            logger.warning("[INVENTORY] API response timed out — falling back to UI detection")
         except Exception as e:
-            logger.warning(f"Navigation or inventory fetch error: {e}")
+            logger.warning(f"[INVENTORY] Intercept error: {e}")
 
         await asyncio.sleep(2)
         # ── Log inventory ──
