@@ -1,4 +1,5 @@
 import os
+
 from playwright.async_api import async_playwright
 
 
@@ -20,6 +21,7 @@ class BlinkitAuth:
         """Starts the Playwright browser (Firefox)."""
         self.playwright = await async_playwright().start()
         self.browser = await self.playwright.firefox.launch(headless=self.headless)
+        print(f"[BROWSER] Using: {self.browser.browser_type.name}")
 
         # Default fallback (Noida Sector 62)
         geolocation = {"latitude": 19.1422, "longitude": 72.9932}

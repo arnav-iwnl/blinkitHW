@@ -14,7 +14,6 @@ import os
 import difflib
 from datetime import datetime
 from pathlib import Path
-from urllib import response
 from dotenv import load_dotenv
 
 # Load environment variables from .env file (specify absolute path)
@@ -630,53 +629,93 @@ class ProductWatcher:
     
     
     async def check_product_status(self):
+    #  """Check if product is available or coming soon"""
+    #  try:
+    #     self.query_count += 1
+    #     logger.info(f"[CHECK #{self.query_count}] Navigating to product URL...")
+
+    #     # ── Register inventory interceptor BEFORE navigation ──
+    #     inventory_data = {}
+
+    #     async def handle_response(response):
+    #         try:
+    #             if "/v1/layout/product/" in response.url and response.request.method == "POST":
+    #                 data = await response.json()
+                    
+    #                 snippets = data.get("response", {}).get("snippets", [])
+    #                 for snippet in snippets:
+    #                     attrs = snippet.get("tracking", {}).get("common_attributes", {})
+    #                     if "inventory" in attrs:
+    #                         inventory_data["inventory"]      = attrs.get("inventory")
+    #                         inventory_data["inventory_text"] = attrs.get("inventory_text")
+    #                         inventory_data["state"]          = attrs.get("state")
+    #                         inventory_data["price"]          = attrs.get("price")
+    #                         inventory_data["mrp"]            = attrs.get("mrp")
+    #                         break
+    #         except Exception as e:
+    #             logger.warning(f"[INVENTORY] Response parse error: {e}")
+
+    #     self.order.page.on("response", handle_response)
+
+    #     # ── Single navigation ──
+    #     try:
+    #         await self.order.page.goto(self.product_url, wait_until="domcontentloaded", timeout=30000)
+    #     except Exception as e:
+    #         logger.warning(f"Navigation took longer: {e}")
+    #     finally:
+    #         await asyncio.sleep(2)  # let XHR settle
+    #         self.order.page.remove_listener("response", handle_response)
+    ####
+    
      """Check if product is available or coming soon"""
      try:
         self.query_count += 1
         logger.info(f"[CHECK #{self.query_count}] Navigating to product URL...")
 
-        # ── Register inventory interceptor BEFORE navigation ──
         inventory_data = {}
-        state=None
-        async def handle_response(response):
+
+        async def fetch_inventory():
             try:
-                    response   = await self.order.page.wait_for_response(
-                                    lambda r: "/v1/layout/product/" in r.url and r.status == 200,
-                                    timeout=5000
-                                    )
-                # if "/v1/layout/product/" in response.url and response.request.method == "POST":
-                    try:
-                        body = await response.body()
-                        if not body:
-                            return
-                        data = json.loads(body.decode("utf-8", errors="ignore"))
-                    except Exception as e:
-                        logger.warning(f"[INVENTORY] Failed to parse body: {e}")
-                        return
-                    snippets = data.get("response", {}).get("snippets", [])
-                    for snippet in snippets:
-                        attrs = snippet.get("tracking", {}).get("common_attributes", {})
-                        if "inventory" in attrs:
-                            inventory_data["inventory"]      = attrs.get("inventory")
-                            inventory_data["inventory_text"] = attrs.get("inventory_text")
-                            inventory_data["state"]          = attrs.get("state")
-                            inventory_data["price"]          = attrs.get("price")
-                            inventory_data["mrp"]            = attrs.get("mrp")
-                            break
+                response = await self.order.page.wait_for_response(
+                    lambda r: "/v1/layout/product/" in r.url and r.status == 200,
+                    timeout=15000
+                )
+                body = await response.body()
+                if not body:
+                    logger.warning("[INVENTORY] Empty body received")
+                    return
+
+                data = json.loads(body.decode("utf-8", errors="ignore"))
+                snippets = data.get("response", {}).get("snippets", [])
+                for snippet in snippets:
+                    attrs = snippet.get("tracking", {}).get("common_attributes", {})
+                    if "inventory" in attrs:
+                        inventory_data["inventory"]      = attrs.get("inventory")
+                        inventory_data["inventory_text"] = attrs.get("inventory_text")
+                        inventory_data["state"]          = attrs.get("state")
+                        inventory_data["price"]          = attrs.get("price")
+                        inventory_data["mrp"]            = attrs.get("mrp")
+                        logger.info(
+                            f"[INVENTORY] state={inventory_data['state']} | "
+                            f"inventory={inventory_data['inventory']} | "
+                            f"₹{inventory_data['price']}"
+                        )
+                        break
+            except asyncio.TimeoutError:
+                logger.warning("[INVENTORY] wait_for_response timed out — no API call detected")
             except Exception as e:
-                logger.warning(f"[INVENTORY] Response parse error: {e}")
+                logger.warning(f"[INVENTORY] fetch_inventory error: {e}")
 
-        self.order.page.on("response", handle_response)
-
-        # ── Single navigation ──
+        # ── Run navigation and inventory fetch concurrently ──
         try:
-            await self.order.page.goto(self.product_url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.gather(
+                self.order.page.goto(self.product_url, wait_until="domcontentloaded", timeout=30000),
+                fetch_inventory()
+            )
         except Exception as e:
-            logger.warning(f"Navigation took longer: {e}")
-        finally:
-            await asyncio.sleep(2)  # let XHR settle
-            self.order.page.remove_listener("response", handle_response)
+            logger.warning(f"Navigation or inventory fetch error: {e}")
 
+        await asyncio.sleep(2)
         # ── Log inventory ──
         if inventory_data:
             state          = inventory_data.get("state")
@@ -684,8 +723,7 @@ class ProductWatcher:
             price          = inventory_data.get("price")
             logger.info(f"[INVENTORY] {inventory} | State: {state} | ₹{price}")
             self.inventory_data = inventory_data
-        if state is None:
-            logger.warning("[FALLBACK] API failed → using UI detection")
+
         if state == "out_of_stock":
                 logger.warning("[INVENTORY] Product is out of stock per API — skipping")
                 self.write_status("out_of_stock", {
