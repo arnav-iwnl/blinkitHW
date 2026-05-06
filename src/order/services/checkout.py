@@ -305,14 +305,19 @@ class CheckoutService(BaseService):
         """Decode a base64 QR image and return the embedded text/URL."""
         try:
             img_bytes = base64.b64decode(b64)
-            img = Image.open(io.BytesIO(img_bytes))
+            img = Image.open(io.BytesIO(img_bytes)).convert("RGB")  # convert to grayscale
             logger.info(f"[QR] Image size: {img.size}, mode: {img.mode}")
+            
+            if img.width < 300 or img.height < 300:
+                scale = (300 // min(img.width, img.height)) + 1
+                img = img.resize((img.width * scale, img.height * scale), Image.NEAREST)
+                logger.info(f"[QR] Upscaled to {img.size} (scale {scale}x)")
             results = pyzbar_decode(img)
             logger.info(f"[QR] pyzbar results count: {len(results)}")
             if results:
                 decoded = results[0].data.decode("utf-8")
                 logger.info(f"[QR] Decoded text: {decoded}")
-                return results[0].data.decode("utf-8")
+                return decoded
         except Exception as e:
             logger.warning(f"[QR] Decode failed: {e}")
         return None

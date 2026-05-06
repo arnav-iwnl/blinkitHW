@@ -212,7 +212,8 @@ class ProductWatcher:
             "telegram_bot_token": telegram_bot_token,
             "telegram_channel_id": telegram_channel_id
         }
-
+        self.inventory_data = {}
+        
     def extract_product_id(self, url):
         """Extract product ID from URL"""
         try:
@@ -253,7 +254,50 @@ class ProductWatcher:
             logger.debug("get_product_title: extraction failed, returning Unknown")
 
         return "Unknown"
+    
+    async def get_inventory_status(self, page) -> dict | None:
+      """Intercept Blinkit's own product API call to extract inventory data."""
 
+      result = {}
+
+      async def handle_response(response):
+        try:
+            if "/v1/layout/product/" in response.url and response.request.method == "POST":
+                data = await response.json()
+                snippets = data.get("response", {}).get("snippets", [])
+
+                # Find the snippet that has common_attributes with inventory
+                for snippet in snippets:
+                    attrs = snippet.get("tracking", {}).get("common_attributes", {})
+                    if "inventory" in attrs:
+                        result["inventory"]      = attrs.get("inventory")
+                        result["inventory_text"] = attrs.get("inventory_text")
+                        result["state"]          = attrs.get("state")
+                        result["price"]          = attrs.get("price")
+                        result["mrp"]            = attrs.get("mrp")
+                        logger.info(
+                            f"[INVENTORY] state={result['state']} | "
+                            f"inventory={result['inventory']} | "
+                            f"text='{result['inventory_text']}' | "
+                            f"price=₹{result['price']}"
+                        )
+                        break
+        except Exception as e:
+            logger.warning(f"[INVENTORY] Response parse error: {e}")
+
+    # Register listener BEFORE navigation so we don't miss the request
+        page.on("response", handle_response)
+        try:
+            await page.goto(self.product_url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(2)  # let all XHR settle
+        finally:
+            page.remove_listener("response", handle_response)
+
+        if not result:
+            logger.warning("[INVENTORY] No inventory data intercepted — API call may not have fired")
+
+        return result or None
+    
     async def check_stock_status(self, page):
         """Check if product is out of stock"""
         try:
@@ -582,92 +626,213 @@ class ProductWatcher:
             logger.error(f"Error writing status file: {e}")
             return False
 
-    async def check_product_status(self):
-        """Check if product is available or coming soon"""
-        try:
-            self.query_count += 1
-            logger.info(f"[CHECK #{self.query_count}] Navigating to product URL...")
+    # async def check_product_status(self):
+    #     """Check if product is available or coming soon"""
+    #     try:
+    #         self.query_count += 1
+    #         logger.info(f"[CHECK #{self.query_count}] Navigating to product URL...")
             
-            # Navigate to product URL
-            try:
-                await self.order.page.goto(self.product_url, wait_until="domcontentloaded", timeout=30000)
-            except Exception as e:
-                logger.warning(f"Navigation took longer: {e}")
+    #         # Navigate to product URL
+    #         try:
+    #             await self.order.page.goto(self.product_url, wait_until="domcontentloaded", timeout=30000)
+    #         except Exception as e:
+    #             logger.warning(f"Navigation took longer: {e}")
             
-            await asyncio.sleep(2)
+    #         await asyncio.sleep(2)
             
-            # Get product details from page
-            product_name = "Unknown"
-            coming_soon_status = "Unknown"
+    #         # Get product details from page
+    #         product_name = "Unknown"
+    #         coming_soon_status = "Unknown"
             
-            try:
-                # Extract product name using robust extractor
-                try:
-                    raw_name = await self.get_product_title(self.order.page)
-                    product_name = normalize_product_name(raw_name)
-                    logger.info(f"[PRODUCT] Name: {colorize_product(product_name)}")
-                    # Store for verification during purchase if not already set
-                    if not self.expected_product_name:
-                        self.expected_product_name = product_name
-                        logger.info(f"[EXPECTED] Remembered product name for verification: {colorize_product(self.expected_product_name)}")
-                except Exception:
-                    # Ignore extraction errors and continue to status checks
-                    pass
+    #         try:
+    #             # Extract product name using robust extractor
+    #             try:
+    #                 raw_name = await self.get_product_title(self.order.page)
+    #                 product_name = normalize_product_name(raw_name)
+    #                 logger.info(f"[PRODUCT] Name: {colorize_product(product_name)}")
+                   
+    #                 # Store for verification during purchase if not already set
+                    
+    #                 if not self.expected_product_name:
+    #                     self.expected_product_name = product_name
+    #                     logger.info(f"[EXPECTED] Remembered product name for verification: {colorize_product(self.expected_product_name)}")
+    #             except Exception:
+    #                 # Ignore extraction errors and continue to status checks
+    #                 pass
 
-                # Check for "Coming Soon" text
-                if await self.order.page.is_visible("text=Coming Soon"):
+    #             # Check for "Coming Soon" text
+    #             if await self.order.page.is_visible("text=Coming Soon"):
     
-                    coming_soon_status = "Coming Soon"
-                else:
-                    coming_soon_status = "Available"
+    #                 coming_soon_status = "Coming Soon"
+    #             else:
+    #                 coming_soon_status = "Available"
                     
-                logger.info(f"[STATUS] \033[93m{coming_soon_status}\033[0m")
+    #             logger.info(f"[STATUS] \033[93m{coming_soon_status}\033[0m")
                 
+    #         except Exception as e:
+    #             logger.warning(f"Error extracting product details: {e}")
+            
+    #         # Check if product is AVAILABLE (no Coming Soon, has ADD button)
+    #         is_coming_soon = coming_soon_status == "Coming Soon"
+    #         is_add_to_cart = await self.order.page.is_visible("text=ADD")
+            
+    #         logger.info(f"Coming Soon visible: {is_coming_soon}, Add button visible: {is_add_to_cart}")
+            
+    #         if is_add_to_cart and not is_coming_soon:
+    #             # Product is AVAILABLE
+    #             logger.info(f"[AVAILABLE] Product {colorize_product(product_name)} is now AVAILABLE!")
+                
+    #             # Play alert sound
+    #             play_alert_sound()
+                
+    #             self.write_status("available", {
+    #                 "message": "Product is available for purchase!",
+    #                 "product_name": product_name,
+    #                 "product_id": self.product_id,
+    #                 "found_at": datetime.now().isoformat()
+    #             })
+    #             return True
+                    
+    #         elif is_coming_soon:
+    #             # Still coming soon
+    #             logger.info(f"[WAITING] Product {colorize_product(product_name)} is still Coming Soon...")
+    #             self.write_status("coming_soon", {
+    #                 "message": "Product still Coming Soon in your location",
+    #                 "product_name": product_name,
+    #                 "last_checked": datetime.now().isoformat()
+    #             })
+    #             return False
+    #         else:
+    #             logger.warning("[UNKNOWN] Could not determine product status")
+    #             self.write_status("unknown", {
+    #                 "message": "Could not determine if product is available or coming soon",
+    #                 "product_name": product_name
+    #             })
+    #             return False
+                
+    #     except Exception as e:
+    #         logger.error(f"Error checking product: {e}")
+    #         self.write_status("error", {"error": str(e)})
+    #         return False
+    
+    async def check_product_status(self):
+     """Check if product is available or coming soon"""
+     try:
+        self.query_count += 1
+        logger.info(f"[CHECK #{self.query_count}] Navigating to product URL...")
+
+        # ── Register inventory interceptor BEFORE navigation ──
+        inventory_data = {}
+
+        async def handle_response(response):
+            try:
+                if "/v1/layout/product/" in response.url and response.request.method == "POST":
+                    data = await response.json()
+                    snippets = data.get("response", {}).get("snippets", [])
+                    for snippet in snippets:
+                        attrs = snippet.get("tracking", {}).get("common_attributes", {})
+                        if "inventory" in attrs:
+                            inventory_data["inventory"]      = attrs.get("inventory")
+                            inventory_data["inventory_text"] = attrs.get("inventory_text")
+                            inventory_data["state"]          = attrs.get("state")
+                            inventory_data["price"]          = attrs.get("price")
+                            inventory_data["mrp"]            = attrs.get("mrp")
+                            break
             except Exception as e:
-                logger.warning(f"Error extracting product details: {e}")
-            
-            # Check if product is AVAILABLE (no Coming Soon, has ADD button)
-            is_coming_soon = coming_soon_status == "Coming Soon"
-            is_add_to_cart = await self.order.page.is_visible("text=ADD")
-            
-            logger.info(f"Coming Soon visible: {is_coming_soon}, Add button visible: {is_add_to_cart}")
-            
-            if is_add_to_cart and not is_coming_soon:
-                # Product is AVAILABLE
-                logger.info(f"[AVAILABLE] Product {colorize_product(product_name)} is now AVAILABLE!")
-                
-                # Play alert sound
-                play_alert_sound()
-                
-                self.write_status("available", {
-                    "message": "Product is available for purchase!",
-                    "product_name": product_name,
-                    "product_id": self.product_id,
-                    "found_at": datetime.now().isoformat()
-                })
-                return True
-                    
-            elif is_coming_soon:
-                # Still coming soon
-                logger.info(f"[WAITING] Product {colorize_product(product_name)} is still Coming Soon...")
-                self.write_status("coming_soon", {
-                    "message": "Product still Coming Soon in your location",
-                    "product_name": product_name,
+                logger.warning(f"[INVENTORY] Response parse error: {e}")
+
+        self.order.page.on("response", handle_response)
+
+        # ── Single navigation ──
+        try:
+            await self.order.page.goto(self.product_url, wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:
+            logger.warning(f"Navigation took longer: {e}")
+        finally:
+            await asyncio.sleep(2)  # let XHR settle
+            self.order.page.remove_listener("response", handle_response)
+
+        # ── Log inventory ──
+        if inventory_data:
+            state          = inventory_data.get("state")
+            inventory      = inventory_data.get("inventory")
+            price          = inventory_data.get("price")
+            logger.info(f"[INVENTORY] {inventory} | State: {state} | ₹{price}")
+            self.inventory_data = inventory_data
+
+        if state == "out_of_stock":
+                logger.warning("[INVENTORY] Product is out of stock per API — skipping")
+                self.write_status("out_of_stock", {
+                    "message": "Product is out of stock per API",
                     "last_checked": datetime.now().isoformat()
                 })
                 return False
+        else:
+            logger.warning("[INVENTORY] No inventory data intercepted")
+
+        # ── Product name ──
+        product_name = "Unknown"
+        coming_soon_status = "Unknown"
+
+        try:
+            raw_name = await self.get_product_title(self.order.page)
+            product_name = normalize_product_name(raw_name)
+            logger.info(f"[PRODUCT] Name: {colorize_product(product_name)}")
+
+            if not self.expected_product_name:
+                self.expected_product_name = product_name
+                logger.info(f"[EXPECTED] Remembered: {colorize_product(self.expected_product_name)}")
+        except Exception:
+            pass
+
+        # ── Coming Soon check ──
+        try:
+            if await self.order.page.is_visible("text=Coming Soon"):
+                coming_soon_status = "Coming Soon"
             else:
-                logger.warning("[UNKNOWN] Could not determine product status")
-                self.write_status("unknown", {
-                    "message": "Could not determine if product is available or coming soon",
-                    "product_name": product_name
-                })
-                return False
-                
+                coming_soon_status = "Available"
+            logger.info(f"[STATUS] \033[93m{coming_soon_status}\033[0m")
         except Exception as e:
-            logger.error(f"Error checking product: {e}")
-            self.write_status("error", {"error": str(e)})
+            logger.warning(f"Error checking coming soon status: {e}")
+
+        # ── Availability decision ──
+        is_coming_soon  = coming_soon_status == "Coming Soon"
+        is_add_to_cart  = await self.order.page.is_visible("text=ADD")
+
+        logger.info(f"Coming Soon visible: {is_coming_soon}, Add button visible: {is_add_to_cart}")
+
+        if is_add_to_cart and not is_coming_soon:
+            logger.info(f"[AVAILABLE] Product {colorize_product(product_name)} is now AVAILABLE!")
+            play_alert_sound()
+            self.write_status("available", {
+                "message": "Product is available for purchase!",
+                "product_name": product_name,
+                "product_id": self.product_id,
+                "found_at": datetime.now().isoformat()
+            })
+            return True
+
+        elif is_coming_soon:
+            logger.info(f"[WAITING] Product {colorize_product(product_name)} is still Coming Soon...")
+            self.write_status("coming_soon", {
+                "message": "Product still Coming Soon in your location",
+                "product_name": product_name,
+                "last_checked": datetime.now().isoformat()
+            })
             return False
+
+        else:
+            logger.warning("[UNKNOWN] Could not determine product status")
+            self.write_status("unknown", {
+                "message": "Could not determine if product is available or coming soon",
+                "product_name": product_name
+            })
+            return False
+
+     except Exception as e:
+        logger.error(f"Error checking product: {e}")
+        self.write_status("error", {"error": str(e)})
+        return False
 
     async def watch(self, max_checks=None):
         """
@@ -776,24 +941,6 @@ class ProductWatcher:
 
                 self.telegram_bot.polling_task = asyncio.create_task(self.telegram_bot.start_polling())
             
-            # Start Telegram polling if configured
-            # if self.telegram_bot:
-            #     logger.info("[TELEGRAM] Starting polling for button callbacks...")
-                
-            #     # Register callback handlers
-            #     async def on_retry():
-            #         logger.info("[TELEGRAM] Retry button clicked - will restart watch after current action")
-            #         self.telegram_retry_event.set()
-                
-            #     async def on_cancel():
-            #         logger.info("[TELEGRAM] Cancel button clicked - stopping watch")
-            #         self.telegram_cancel_event.set()
-                
-            #     self.telegram_bot.register_callback("retry_watch", on_retry)
-            #     self.telegram_bot.register_callback("cancel_watch", on_cancel)
-                
-            #     # Start polling in background
-            #     self.telegram_bot.polling_task = asyncio.create_task(self.telegram_bot.start_polling())
             
             
         except Exception as e:
@@ -904,16 +1051,10 @@ class ProductWatcher:
         """Automatically add to cart and proceed to checkout"""
         try:
             logger.info("Step 1: Verifying product details before adding to cart...")
-            
-            # Check if telegram bot is configured
-            # if self.telegram_bot:
-            #     logger.info(f"[INFO] Telegram bot is configured and ready")
-            # else:
-            #     logger.info(f"[INFO] Telegram bot is NOT configured")
-            
-            # product name from page will be our expected value
+    
             raw_name = await self.get_product_title(self.order.page)
             product_name = normalize_product_name(raw_name)
+
             logger.info(f"[VERIFY] Product on screen: {colorize_product(product_name)}")
             # store it so other methods can reference if needed
             self.expected_product_name = product_name
@@ -954,10 +1095,10 @@ class ProductWatcher:
             if removed:
                     logger.info(f"[CLEANUP] Removed {len(removed)} mismatched item(s) from cart: {removed}")
                 # give the cart a moment to settle and then re-open if necessary
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(3)
             if await self.order.page.is_visible("text=My Cart"):
                     await self.order.page.click("text=My Cart")
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(3)
 
             logger.info("Step 3b: Verifying product in cart...")
             # Extract product name from cart and verify it matches expected product
@@ -968,10 +1109,10 @@ class ProductWatcher:
             if removed:
                     logger.info(f"[CLEANUP] Removed {len(removed)} mismatched item(s) from cart: {removed}")
                 # give the cart a moment to settle and then re-open if necessary
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2)
             # verify cart item equals page product name
             if self.quantity > 1:
-                await asyncio.sleep(2)
+                await asyncio.sleep(1)
                 logger.info(f"[QTY] Incrementing quantity to {self.quantity} inside cart...")
                 for i in range(self.quantity - 1):
                     try:
@@ -1034,13 +1175,15 @@ class ProductWatcher:
             if self.telegram_bot:
                 logger.info("Step 3b: Sending Telegram notification with action buttons...")
                 product_name = self.expected_product_name or cart_product_name or "Unknown Product"
+                inventory = self.inventory_data.get("inventory") if self.inventory_data else "Unknown"
                 
                 try:
                     telegram_success = await self.telegram_bot.send_product_notification(
                         product_name=product_name,
                         product_url=self.product_url,
                         location_name=self.location_label,
-                        with_buttons=self.use_telegram_callbacks
+                        with_buttons=self.use_telegram_callbacks,
+                        product_inventory=self.inventory_data.get("inventory")
                     )
                     
                     if telegram_success:
@@ -1137,6 +1280,7 @@ class ProductWatcher:
                         product_name=self.expected_product_name or "Unknown Product",
                         product_url=self.product_url,
                         quantity=self.quantity,
+                        product_inventory=self.inventory_data.get("inventory"),
                         amount=payment_result["amount"],
                         upi_url=payment_result["upi_url"],
                         location_name=self.location_label,

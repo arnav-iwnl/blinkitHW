@@ -70,7 +70,7 @@ class TelegramBot:
             logger.error(f"Telegram error: {e}")
             return False
     
-    async def send_product_notification(self, product_name: str, product_url: str, location_name: str, with_buttons: bool = False) -> bool:
+    async def send_product_notification(self, product_name: str, product_url: str, location_name: str, with_buttons: bool = False, product_inventory: int = None) -> bool:
         """
         Send a formatted product availability notification
         
@@ -79,7 +79,8 @@ class TelegramBot:
             product_url: URL to the product
             location_name: Delivery location name
             with_buttons: If True, add inline buttons for user actions
-        
+            product_inventory: Available inventory count
+
         Returns:
             True if successful, False otherwise
         """
@@ -89,9 +90,12 @@ class TelegramBot:
             f"<b>Product:</b> {product_name}\n\n"
             f"📍<b>Location:</b> <b>{location_name}</b>\n\n"
             f"<b>Link:</b>\n"
-            f"<a href=\"{product_url}\">Open on Blinkit</a>"
         )
+        if product_inventory is not None:
+            message += f"🔢 <b>Inventory:</b> {product_inventory}\n"
 
+        message += (f'\n🔗 <a href="{product_url}">View Product on Blinkit</a>')
+            
         if with_buttons:
             # add an "Open Link" button that points to the product URL
             buttons = {
@@ -300,16 +304,24 @@ class TelegramBot:
     amount: str,
     upi_url: str,
     location_name: str = "Home",
+    product_inventory: int = None
+    
 ) -> bool:
         """Send a Telegram notification with payment details and a Pay Now button."""
         message = (
-            f"💳 <b>Payment Ready — Complete Your Order</b>\n\n"
-            f"📦 <b>Product:</b> {product_name}\n"
-            f"🔢 <b>Quantity:</b> {quantity}\n"
-            f"💰 <b>Total Amount:</b> ₹{amount}\n"
-            f"📍 <b>Location:</b> {location_name}\n\n"
-            f"<a href=\"{product_url}\">Open on Blinkit</a>\n\n"
-            f"Tap *Pay Now* below to complete payment via UPI."
+        f"💳 <b>Payment Ready — Complete Your Order</b>\n\n"
+        f"📦 <b>Product:</b> {product_name}\n"
+        f"🔢 <b>Quantity:</b> {quantity}\n"
+        )
+
+        if product_inventory is not None:
+          message += f"📦 <b>Stock Left:</b> {product_inventory}\n"
+
+        message += (
+        f"💰 <b>Total Amount:</b> ₹{amount}\n"
+        f"📍 <b>Location:</b> {location_name}\n\n"
+        f'🔗 <a href="{product_url}">Open on Blinkit</a>\n\n'
+        f"Tap <b>Pay Now</b> below to complete payment via UPI."
         )
         reply_markup = None
         redirect_base = os.getenv("UPI_REDIRECT_BASE")
