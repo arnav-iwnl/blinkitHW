@@ -761,6 +761,7 @@ class ProductWatcher:
 
         if is_add_to_cart and not is_coming_soon:
             logger.info(f"[AVAILABLE] Product {colorize_product(product_name)} is now AVAILABLE!")
+            
             play_alert_sound()
             self.write_status("available", {
                 "message": "Product is available for purchase!",
@@ -961,6 +962,27 @@ class ProductWatcher:
                     
                     # Product is in stock - proceed with auto-purchase
                     logger.info("Starting auto-purchase...")
+                    if self.telegram_bot:
+                            logger.info("Available Notification: Sending Telegram notification of availability...")
+                            product_name = self.expected_product_name or  "Unknown Product"
+
+                
+                            try:
+                                telegram_success = await self.telegram_bot.send_product_notification(
+                                product_name=product_name,
+                                product_url=self.product_url,
+                                location_name=self.location_label,
+                                with_buttons=self.use_telegram_callbacks,
+                                product_inventory=self.inventory_data.get("inventory")
+                                )
+                    
+                                if telegram_success:
+                                    logger.info("[OK] Telegram notification sent successfully")
+                                    
+                                else:
+                                    logger.warning("[WARN] Telegram notification failed to send")
+                            except Exception as e:
+                                logger.error(f"[ERROR] Telegram notification error: {e}")
                     success = await self.auto_purchase()
                     
                     if success:
@@ -1130,27 +1152,27 @@ class ProductWatcher:
                     logger.info("[OK] Cart product matches page product")
             
             # Send Telegram notification only after product is verified to be correct
-            if self.telegram_bot:
-                logger.info("Step 3b: Sending Telegram notification with action buttons...")
-                product_name = self.expected_product_name or cart_product_name or "Unknown Product"
-                inventory = self.inventory_data.get("inventory") if self.inventory_data else "Unknown"
+            # if self.telegram_bot:
+            #     logger.info("Step 3b: Sending Telegram notification with action buttons...")
+            #     product_name = self.expected_product_name or cart_product_name or "Unknown Product"
+            #     inventory = self.inventory_data.get("inventory") if self.inventory_data else "Unknown"
                 
-                try:
-                    telegram_success = await self.telegram_bot.send_product_notification(
-                        product_name=product_name,
-                        product_url=self.product_url,
-                        location_name=self.location_label,
-                        with_buttons=self.use_telegram_callbacks,
-                        product_inventory=self.inventory_data.get("inventory")
-                    )
+            #     try:
+            #         telegram_success = await self.telegram_bot.send_product_notification(
+            #             product_name=product_name,
+            #             product_url=self.product_url,
+            #             location_name=self.location_label,
+            #             with_buttons=self.use_telegram_callbacks,
+            #             product_inventory=self.inventory_data.get("inventory")
+            #         )
                     
-                    if telegram_success:
-                        logger.info("[OK] Telegram notification with buttons sent successfully")
-                        logger.info("[INFO] User can now click 'Retry' button to restart the watch process")
-                    else:
-                        logger.warning("[WARN] Telegram notification failed to send")
-                except Exception as e:
-                    logger.error(f"[ERROR] Telegram notification error: {e}")
+            #         if telegram_success:
+            #             logger.info("[OK] Telegram notification with buttons sent successfully")
+            #             logger.info("[INFO] User can now click 'Retry' button to restart the watch process")
+            #         else:
+            #             logger.warning("[WARN] Telegram notification failed to send")
+            #     except Exception as e:
+            #         logger.error(f"[ERROR] Telegram notification error: {e}")
             
             logger.info("[SUCCESS] Product successfully added to cart!")
             print("\n" + "=" * 70)
