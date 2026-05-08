@@ -1,5 +1,7 @@
 import os
-
+import tempfile
+import shutil
+import glob
 from playwright.async_api import async_playwright
 
 
@@ -209,8 +211,18 @@ class BlinkitAuth:
         print(f"Session saved to {self.session_path}")
 
     async def close(self):
-        """Closes the browser."""
-        if self.browser:
-            await self.browser.close()
-        if self.playwright:
-            await self.playwright.stop()
+        try:
+            """Closes the browser."""
+            if self.browser:
+                await self.browser.close()
+            if self.playwright:
+                await self.playwright.stop()
+            temp_dir = tempfile.gettempdir()
+            for folder in glob.glob(os.path.join(temp_dir, "playwright*")):
+                try:
+                    shutil.rmtree(folder, ignore_errors=True)
+                except Exception:
+                    pass
+            print("[BROWSER] Temp folders cleaned up")
+        except Exception as e:
+            print(f"Error during browser cleanup: {e}")

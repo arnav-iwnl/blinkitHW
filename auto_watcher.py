@@ -1151,29 +1151,6 @@ class ProductWatcher:
                 else:
                     logger.info("[OK] Cart product matches page product")
             
-            # Send Telegram notification only after product is verified to be correct
-            # if self.telegram_bot:
-            #     logger.info("Step 3b: Sending Telegram notification with action buttons...")
-            #     product_name = self.expected_product_name or cart_product_name or "Unknown Product"
-            #     inventory = self.inventory_data.get("inventory") if self.inventory_data else "Unknown"
-                
-            #     try:
-            #         telegram_success = await self.telegram_bot.send_product_notification(
-            #             product_name=product_name,
-            #             product_url=self.product_url,
-            #             location_name=self.location_label,
-            #             with_buttons=self.use_telegram_callbacks,
-            #             product_inventory=self.inventory_data.get("inventory")
-            #         )
-                    
-            #         if telegram_success:
-            #             logger.info("[OK] Telegram notification with buttons sent successfully")
-            #             logger.info("[INFO] User can now click 'Retry' button to restart the watch process")
-            #         else:
-            #             logger.warning("[WARN] Telegram notification failed to send")
-            #     except Exception as e:
-            #         logger.error(f"[ERROR] Telegram notification error: {e}")
-            
             logger.info("[SUCCESS] Product successfully added to cart!")
             print("\n" + "=" * 70)
             print("✓ PRODUCT ADDED TO CART")
