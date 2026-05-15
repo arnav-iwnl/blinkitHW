@@ -225,7 +225,46 @@ class CheckoutService(BaseService):
 
      except Exception as e:
         return f"ERROR: {str(e)}"
+    
+    async def select_mobikwik_payment(self):
+     """Click Make payment inside the payment iframe."""
 
+     logger.info("Attempting to click Make payment...")
+
+     try:
+        iframe_element = await self.page.wait_for_selector(
+            "#payment_widget",
+            timeout=30000
+        )
+
+        if not iframe_element:
+            return "ERROR: Payment widget iframe not found."
+
+        frame = await iframe_element.content_frame()
+
+        if not frame:
+            return "ERROR: Could not access payment iframe."
+
+        # Wait for iframe content to stabilize
+        await frame.wait_for_load_state("networkidle")
+
+        # Locate button
+        make_payment_btn = frame.get_by_role(
+            "button",
+            name="Make payment"
+        )
+
+        # Click
+        await make_payment_btn.click()
+
+        logger.info("Clicked Make payment.")
+
+        return "OK: Payment initiated."
+
+     except Exception as e:
+         
+        logger.exception("Failed to click Make payment")
+        return f"ERROR: {str(e)}"
 
     async def select_upi_payment(self):
      """Select UPI and generate QR code inside the payment iframe."""

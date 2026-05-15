@@ -1042,18 +1042,39 @@ class ProductWatcher:
             logger.info("Step 2: Adding product to cart...")
             
             # Make sure we're clicking the right ADD button for this product
-            add_selectors = ["text=ADD", "text=Add", ".add-to-cart", "button.add", "button:has-text('Add')"]
+            add_selectors = ["role=button[name='Add to cart']", "text='Add to cart'"]
             clicked = False
-            for sel in add_selectors:
-                try:
-                    if await self.order.page.is_visible(sel):
-                        await self.order.page.click(sel)
-                        await asyncio.sleep(2)
-                        logger.info(f"[OK] Clicked ADD selector: {sel}")
-                        clicked = True
-                        break
-                except Exception:
-                    continue
+            # for sel in add_selectors:
+            try:
+                add_btn = self.order.page.get_by_role(
+                                    "button",
+                                    name="Add to cart"
+                                    )
+
+                await add_btn.wait_for(state="visible", timeout=5000)
+
+                await add_btn.scroll_into_view_if_needed()
+
+                await add_btn.click()
+
+                await asyncio.sleep(2)
+
+                logger.info("[OK] Clicked Add to cart button")
+                    # add_btn = self.order.page.locator(
+                    #     "role=button[name='Add to Cart']"
+                    #      ).locator(":visible")
+
+                    # await add_btn.scroll_into_view_if_needed()
+
+                    # await add_btn.click()
+
+                    # await asyncio.sleep(2)
+
+                    # logger.info("[OK] Clicked visible Add to Cart button")
+
+            except Exception as e:
+                    logger.error(f"Failed to click Add to Cart button: {e}")
+                    return False
 
             if not clicked:
                 logger.error("ADD button not found with known selectors")
@@ -1213,7 +1234,9 @@ class ProductWatcher:
             # Step 6: Select payment method based on user preference
             # ----------------------------------------------------------------
             logger.info(f"Step 6: Selecting payment method: {self.preferred_payment.upper()}...")
-
+            if self.preferred_payment == "mobi":   
+                payment_result = await checkout.select_mobikwik_payment()
+                logger.info(f"[CHECKOUT] Payment selection result: {payment_result}")
             if self.preferred_payment == "upi":
                 payment_result = await checkout.select_upi_payment()
                 # After:
@@ -1246,7 +1269,9 @@ class ProductWatcher:
                 else:
                     logger.warning("[NOTIFY] Skipped — one or more conditions failed (see above)")
             else:
-                payment_result = await checkout.select_cash_payment()
+                await self.order.page.reload(wait_until="networkidle")
+                await asyncio.sleep(3)
+                payment_result = await checkout.select_mobikwik_payment()
                 logger.info(f"[CHECKOUT] Payment selection result: {payment_result}")
 
             if self.use_telegram_callbacks and self.telegram_cancel_event.is_set():
@@ -1258,7 +1283,10 @@ class ProductWatcher:
             # Step 7: Click Pay Now
             # ----------------------------------------------------------------
             logger.info("Step 7: Clicking Pay Now via CheckoutService...")
-            pay_result = await checkout.click_pay_now()
+            await self.order.page.reload(wait_until="networkidle")
+            await asyncio.sleep(3)
+            payment_result = await checkout.select_mobikwik_payment()
+            pay_result = await checkout.select_cash_payment()
             logger.info(f"[CHECKOUT] click_pay_now result: {pay_result}")
 
             if "Could not find" in str(pay_result) or "Error" in str(pay_result):
@@ -1338,8 +1366,8 @@ async def main():
     automate_checkout = input("\nAutomate checkout steps (Proceed to Pay, Select Payment, Pay Now)? (y/N): ").strip().lower() in ('y', 'yes')
     preferred_payment = "cash"
     if automate_checkout:
-        pay_choice = input("\nPreferred payment method? (cash/upi, default 'cash'): ").strip().lower()
-        if pay_choice in ("upi", "cash"):
+        pay_choice = input("\nPreferred payment method? (cash/upi/mobikwik, default 'cash'): ").strip().lower()
+        if pay_choice in ("upi", "cash", "mobi", "mobikwik"):
             preferred_payment = pay_choice
         logger.info(f"Payment method: {preferred_payment.upper()}")
 
