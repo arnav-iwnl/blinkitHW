@@ -11,7 +11,6 @@ import logging
 import re
 import sys
 import os
-import difflib
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -56,7 +55,7 @@ def normalize_product_name(name: str) -> str:
     if not name:
         return name
     # cut at 'Price' keyword or currency symbols
-    import re
+    
     # split on 'Price' word or currency symbols or pipe characters
     parts = re.split(r"\bPrice\b|₹|Rs\.?|\|", name)
     return parts[0].strip()
@@ -466,7 +465,7 @@ class ProductWatcher:
         """Simple token-overlap similarity — no external deps needed.
         Strips weight suffixes (100g, 1kg, 500ml…) before comparing.
         """
-        import re
+
 
         def normalize(s):
             s = s.lower()
