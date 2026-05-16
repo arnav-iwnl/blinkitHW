@@ -1,0 +1,50 @@
+{
+  "products": [
+    {
+      "name": "Kick Sauber F1",
+      "url": "https://blinkit.com/prn/x/prid/774413"
+    },
+    {
+      "name": "Ferrari SF90 Black-Red Tyre",
+      "url": "https://blinkit.com/prn/x/prid/774454"
+    },
+    {
+        "name": "Test",
+        "url": "https://blinkit.com/prn/hot-wheels-69-chevelle-die-cast-car/prid/774443"
+    },
+    {
+        "name": "Milk",
+        "url": "https://blinkit.com/prn/amul-cow-milk/prid/160704"
+    }
+  ],
+  "addresses": [
+    {
+      "label": "Home"
+    },
+    {
+      "label": "Bruno"
+    },
+    {
+      "label": "Pramukh"
+    },
+        {
+      "label": "Sanjana"
+    },
+        {
+      "label": "Mehul"
+    },
+        {
+      "label": "Harshu"
+    },
+    {
+      "label": "Manu"
+    }
+  ],
+  "defaults": {
+    "check_interval": 5,
+    "quantity": 1,
+    "continue_on_oos": true,
+    "automate_checkout": true,
+    "preferred_payment": "mobi"
+  }
+}

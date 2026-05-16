@@ -295,6 +295,7 @@ class ProductWatcher:
 
         if not result:
             logger.warning("[INVENTORY] No inventory data intercepted — API call may not have fired")
+            logger.warning({"Product N"})
 
         return result or None
     
@@ -710,24 +711,7 @@ class ProductWatcher:
             logger.warning(f"[INVENTORY] Intercept error: {e}")
 
         await asyncio.sleep(2)
-        # ── Log inventory ──
-        if inventory_data:
-            state          = inventory_data.get("state")
-            inventory      = inventory_data.get("inventory")
-            price          = inventory_data.get("price")
-            logger.info(f"[INVENTORY] {inventory} | State: {state} | ₹{price}")
-            self.inventory_data = inventory_data
-
-        if state == "out_of_stock":
-                logger.warning("[INVENTORY] Product is out of stock per API — skipping")
-                self.write_status("out_of_stock", {
-                    "message": "Product is out of stock per API",
-                    "last_checked": datetime.now().isoformat()
-                })
-                return False
-        else:
-            logger.warning("[INVENTORY] No inventory data intercepted")
-
+        
         # ── Product name ──
         product_name = "Unknown"
         coming_soon_status = "Unknown"
@@ -742,6 +726,27 @@ class ProductWatcher:
                 logger.info(f"[EXPECTED] Remembered: {colorize_product(self.expected_product_name)}")
         except Exception:
             pass
+        # ── Log inventory ──
+        if inventory_data:
+            state          = inventory_data.get("state")
+            inventory      = inventory_data.get("inventory")
+            price          = inventory_data.get("price")
+            logger.info(f"[INVENTORY] {inventory} | State: {state} | ₹{price}")
+            logger.warning(f"[ LOCATION ] {(self.location_label)}")
+            self.inventory_data = inventory_data
+
+        if state == "out_of_stock":
+                logger.warning("[INVENTORY] Product is out of stock per API — skipping")
+                
+                self.write_status("out_of_stock", {
+                    "message": "Product is out of stock per API",
+                    "last_checked": datetime.now().isoformat()
+                })
+                return False
+        else:
+            logger.warning("[INVENTORY] No inventory data intercepted")
+
+        
 
         # ── Coming Soon check ──
         try:
@@ -1042,37 +1047,38 @@ class ProductWatcher:
             logger.info("Step 2: Adding product to cart...")
             
             # Make sure we're clicking the right ADD button for this product
-            add_selectors = ["role=button[name='Add to cart']", "text='Add to cart'"]
-            clicked = False
+            add_selectors = []
+            # clicked = False
             # for sel in add_selectors:
-            try:
-                add_btn = self.order.page.get_by_role(
-                                    "button",
-                                    name="Add to cart"
-                                    )
+            #  try:
+            #     add_btn = self.order.page.get_by_role(
+            #                         "button",
+            #                         name="Add to cart"
+            #                         )
 
-                await add_btn.wait_for(state="visible", timeout=5000)
+            #     await add_btn.wait_for(state="visible", timeout=5000)
 
-                await add_btn.scroll_into_view_if_needed()
+            #     await add_btn.scroll_into_view_if_needed()
 
-                await add_btn.click()
+            #     await add_btn.click()
 
-                await asyncio.sleep(2)
+            #     await asyncio.sleep(2)
 
-                logger.info("[OK] Clicked Add to cart button")
-                    # add_btn = self.order.page.locator(
-                    #     "role=button[name='Add to Cart']"
-                    #      ).locator(":visible")
+            #     logger.info("[OK] Clicked Add to cart button")
+            add_selectors = ["role=button[name='Add to cart']", "text='Add to cart'", "text=Add to cart", ".add-to-cart", "button:has-text('Add to cart')"]
+            clicked = False
+            for sel in add_selectors:
+                try:
+                    if await self.order.page.is_visible(sel):
+                        await self.order.page.click(sel)
+                        await asyncio.sleep(2)
+                        logger.info(f"[OK] Clicked ADD selector: {sel}")
+                        clicked = True
+                        break
+                except Exception:
+                    continue
 
-                    # await add_btn.scroll_into_view_if_needed()
-
-                    # await add_btn.click()
-
-                    # await asyncio.sleep(2)
-
-                    # logger.info("[OK] Clicked visible Add to Cart button")
-
-            except Exception as e:
+                except Exception as e:
                     logger.error(f"Failed to click Add to Cart button: {e}")
                     return False
 
@@ -1127,7 +1133,7 @@ class ProductWatcher:
 
                         if await plus_btn.is_visible():
                             await plus_btn.click()
-                            await asyncio.sleep(0.5)
+                            await asyncio.sleep(1)
                             logger.info(f"[QTY] Incremented to {i + 2}/{self.quantity}")
                         else:
                             logger.warning(f"[QTY] + button not visible — stopped at {i + 1}")
@@ -1234,19 +1240,17 @@ class ProductWatcher:
             # Step 6: Select payment method based on user preference
             # ----------------------------------------------------------------
             logger.info(f"Step 6: Selecting payment method: {self.preferred_payment.upper()}...")
-            if self.preferred_payment == "mobi":   
-                payment_result = await checkout.select_mobikwik_payment()
-                logger.info(f"[CHECKOUT] Payment selection result: {payment_result}")
+            payment_result = None
+            
             if self.preferred_payment == "upi":
                 payment_result = await checkout.select_upi_payment()
-                # After:
                 logger.info(f"[CHECKOUT] Payment selection result: {payment_result}")
+                
                 # Debug every condition
                 logger.info(f"[NOTIFY] telegram_bot set: {self.telegram_bot is not None}")
                 logger.info(f"[NOTIFY] payment_result is dict: {isinstance(payment_result, dict)}")
                 logger.info(f"[NOTIFY] upi_url present: {payment_result.get('upi_url') if isinstance(payment_result, dict) else f'NOT FOUND'}")
                 logger.info(f"[NOTIFY] amount present: {payment_result.get('amount') if isinstance(payment_result, dict) else f'Found'}")
-
 
                 # Send Telegram UPI payment notification if data is available
                 if (
@@ -1268,11 +1272,22 @@ class ProductWatcher:
                     logger.info(f"[NOTIFY] Notification sent: {success}")
                 else:
                     logger.warning("[NOTIFY] Skipped — one or more conditions failed (see above)")
-            else:
-                await self.order.page.reload(wait_until="networkidle")
-                await asyncio.sleep(3)
+                    
+            elif self.preferred_payment == "mobi":
                 payment_result = await checkout.select_mobikwik_payment()
                 logger.info(f"[CHECKOUT] Payment selection result: {payment_result}")
+                # Mobikwik might already handle payment internally
+                if "Packing your order" in str(payment_result):
+                    logger.info("[SUCCESS] Order already confirmed during payment selection")
+                    return True
+                
+            elif self.preferred_payment == "cash":
+                payment_result = await checkout.select_cash_payment()
+                logger.info(f"[CHECKOUT] Payment selection result: {payment_result}")
+                # Cash might already handle confirmation
+                if "Packing your order" in str(payment_result):
+                    logger.info("[SUCCESS] Order already confirmed during payment selection")
+                    return True
 
             if self.use_telegram_callbacks and self.telegram_cancel_event.is_set():
                 return False
@@ -1280,14 +1295,20 @@ class ProductWatcher:
                 return False
 
             # ----------------------------------------------------------------
-            # Step 7: Click Pay Now
+            # Step 7: Click Pay Now (only if not already done by payment method)
             # ----------------------------------------------------------------
             logger.info("Step 7: Clicking Pay Now via CheckoutService...")
-            await self.order.page.reload(wait_until="networkidle")
-            await asyncio.sleep(3)
-            payment_result = await checkout.select_mobikwik_payment()
-            pay_result = await checkout.select_cash_payment()
-            logger.info(f"[CHECKOUT] click_pay_now result: {pay_result}")
+            try:
+                pay_result = await checkout.select_cash_payment()
+                logger.info(f"[CHECKOUT] select_cash_payment result: {pay_result}")
+            except Exception as e:
+                logger.warning(f"[CHECKOUT] select_cash_payment threw exception (page may have already navigated): {e}")
+                # Check if we're already on the order tracking page
+                current_url = self.order.page.url
+                if "account/orders/track" in current_url:
+                    logger.info("[SUCCESS] Already on order tracking page - payment was successful")
+                    return True
+                pay_result = f"Error: {e}"
 
             if "Could not find" in str(pay_result) or "Error" in str(pay_result):
                 max_wait_seconds = 600   # ← change this to whatever you want
@@ -1315,11 +1336,113 @@ class ProductWatcher:
             return False
 
 
+def load_watcher_config(config_filename="watcher_config.json"):
+    config_path = Path(__file__).parent / config_filename
+    if not config_path.exists():
+        return {}
+    try:
+        with open(config_path, "r", encoding="utf-8") as config_file:
+            return json.load(config_file)
+    except Exception as exc:
+        logger.warning(f"Failed to load watcher config: {exc}")
+        return {}
+
+
+def _get_single_key():
+    if os.name == "nt":
+        import msvcrt
+        key = msvcrt.getwch()
+        return key
+    else:
+         import tty
+         import termios
+         fd = sys.stdin.fileno()
+         old_settings = termios.tcgetattr(fd)
+         try:
+            tty.setraw(fd)
+            key = sys.stdin.read(1)
+            return key
+         finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
+def select_from_menu(options, title, default=0):
+    labels = [item.get('name') or item.get('label') or item.get('url') or '' for item in options]
+    index = default if 0 <= default < len(options) else 0
+    print(f"\n{title}")
+    print("Use ↑/↓ arrows and Enter to select. Press q to cancel.")
+    for i, label in enumerate(labels):
+        prefix = "→" if i == index else " "
+        print(f" {prefix} {i + 1}. {label}")
+
+    while True:
+        key = _get_single_key()
+        if key in ('\r', '\n'):
+            print()
+            return index
+
+        if os.name == 'nt':
+            if key in ('\x00', '\xe0'):
+                arrow = _get_single_key()
+                if arrow == 'H':
+                    index = (index - 1) % len(options)
+                elif arrow == 'P':
+                    index = (index + 1) % len(options)
+            elif key.lower() == 'q':
+                raise KeyboardInterrupt
+        else:
+            if key == '\x1b':
+                second = sys.stdin.read(1)
+                third = sys.stdin.read(1)
+                if second == '[':
+                    if third == 'A':
+                        index = (index - 1) % len(options)
+                    elif third == 'B':
+                        index = (index + 1) % len(options)
+            elif key.lower() == 'q':
+                raise KeyboardInterrupt
+
+        # redraw only the option rows, leaving the title and help text intact
+        lines_to_move_up = len(options)
+        sys.stdout.write(f"\x1b[{lines_to_move_up}A")
+        sys.stdout.flush()
+        for i, label in enumerate(labels):
+            prefix = "→" if i == index else " "
+            sys.stdout.write(f" {prefix} {i + 1}. {label}\n")
+        sys.stdout.flush()
+
+
+def choose_config_option(options, title, default_label_key="name"):
+    if not options:
+        raise ValueError("No configuration options available")
+    try:
+        choice_index = select_from_menu(options, title, default=0)
+    except Exception:
+        # Fallback to typed selection if interactive input is unavailable
+        print(f"\n{title}")
+        for index, item in enumerate(options, start=1):
+            label = item.get(default_label_key) or item.get("label") or item.get("url") or "Unknown"
+            extra = f" - {item.get('url')}" if item.get('url') else ""
+            print(f"  {index}. {label}{extra}")
+        labels = [item.get(default_label_key) or item.get("label") or item.get("url") or '' for item in options]
+        while True:
+            choice = input(f"Select an option [1-{len(options)}] or name (default 1): ").strip()
+            if not choice:
+                return options[0]
+            if choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(options):
+                    return options[idx]
+            normalized = choice.lower()
+            for idx, label in enumerate(labels):
+                if normalized == label.lower() or normalized in label.lower():
+                    return options[idx]
+            print("Invalid selection. Enter the option number or type the name/label.")
+    return options[choice_index]
+
 
 async def main():
     """Main entry point"""
-    
-    # Ask user for product URL and location
     print("\n" + "=" * 70)
     print("BLINKIT PRODUCT WATCHER")
     print("=" * 70)
@@ -1329,44 +1452,63 @@ async def main():
     print("3. Auto-purchase when available")
     print("\nExample URL: https://blinkit.com/prn/x/prid/746548")
     print("-" * 70)
-    
-    product_url = input("\nEnter product URL: ").strip()
-    
+
+    config = load_watcher_config()
+    products = config.get("products", [])
+    addresses = config.get("addresses", [])
+    defaults = config.get("defaults", {})
+
+    if products:
+        selected_product = choose_config_option(products, "Saved products:")
+        product_url = selected_product.get("url", "").strip()
+        print(f"Selected product: {selected_product.get('name', product_url)}")
+    else:
+        product_url = input("\nEnter product URL: ").strip()
+
     if not product_url.startswith("http"):
         logger.error("Invalid URL. Must start with http")
         return
-    
     if "blinkit.com" not in product_url:
         logger.error("Invalid URL. Must be a Blinkit product URL")
         return
-    
-    # Use site UI to select saved address instead of asking for coordinates
+
     print("\nUsing site UI to select a saved address via the site UI. No latitude/longitude input required.")
+    if addresses:
+        selected_address = choose_config_option(addresses, "Saved addresses:", default_label_key="label")
+        location_label = selected_address.get("label", "Home").strip() or "Home"
+        print(f"Selected address: {location_label}")
+    else:
+        location_label = input("\nEnter saved address label to select (default 'Home'): ").strip() or "Home"
 
-    # Ask for the saved-address label to select (default: Home)
-    location_label = input("\nEnter saved address label to select (default 'Home'): ").strip() or "Home"
-
-    # Ask for check interval
+    check_interval = defaults.get("check_interval", 5)
     try:
-        check_interval = int(input("\nEnter check interval in seconds (default 5): ").strip() or "5")
+        check_interval = int(input(f"\nEnter check interval in seconds (default {check_interval}): ").strip() or str(check_interval))
     except ValueError:
-        check_interval = 5
+        check_interval = defaults.get("check_interval", 5)
+
+    quantity = defaults.get("quantity", 1)
     try:
-        quantity = int(input("\nEnter quantity (default 1): ").strip() or "1")
+        quantity = int(input(f"\nEnter quantity (default {quantity}): ").strip() or str(quantity))
     except ValueError:
-        quantity = 1
-        
-    
+        quantity = defaults.get("quantity", 1)
 
-        
-    # Ask if user wants to keep monitoring even if product goes out of stock
-    continue_on_oos = input("\nContinue refreshing if product goes out of stock? (y/N): ").strip().lower() in ('y', 'yes') or "y"
+    continue_on_oos_default = defaults.get("continue_on_oos", True)
+    continue_in = input(f"\nContinue refreshing if product goes out of stock? (y/N, default {'Y' if continue_on_oos_default else 'N'}): ").strip().lower()
+    if continue_in == "":
+        continue_on_oos = continue_on_oos_default
+    else:
+        continue_on_oos = continue_in in ('y', 'yes')
 
-    # Ask if user wants to automate checkout steps (ask once, applies to all retries)
-    automate_checkout = input("\nAutomate checkout steps (Proceed to Pay, Select Payment, Pay Now)? (y/N): ").strip().lower() in ('y', 'yes')
-    preferred_payment = "cash"
+    automate_checkout_default = defaults.get("automate_checkout", False)
+    automate_in = input(f"\nAutomate checkout steps (Proceed to Pay, Select Payment, Pay Now)? (y/N, default {'Y' if automate_checkout_default else 'N'}): ").strip().lower()
+    if automate_in == "":
+        automate_checkout = automate_checkout_default
+    else:
+        automate_checkout = automate_in in ('y', 'yes')
+
+    preferred_payment = defaults.get("preferred_payment", "cash").lower()
     if automate_checkout:
-        pay_choice = input("\nPreferred payment method? (cash/upi/mobikwik, default 'cash'): ").strip().lower()
+        pay_choice = input(f"\nPreferred payment method? (cash/upi/mobikwik, default '{preferred_payment}'): ").strip().lower()
         if pay_choice in ("upi", "cash", "mobi", "mobikwik"):
             preferred_payment = pay_choice
         logger.info(f"Payment method: {preferred_payment.upper()}")

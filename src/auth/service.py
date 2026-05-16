@@ -210,6 +210,19 @@ class BlinkitAuth:
         await self.context.storage_state(path=self.session_path)
         print(f"Session saved to {self.session_path}")
 
+    async def new_page(self, url: str = None, timeout: int = 60000):
+        """Create a new browser tab/page within the existing context."""
+        if not self.context:
+            raise RuntimeError("Browser context is not initialized. Call start_browser() first.")
+
+        page = await self.context.new_page()
+        if url:
+            try:
+                await page.goto(url, timeout=timeout, wait_until="domcontentloaded")
+            except Exception as e:
+                print(f"Warning: Failed to navigate new page to {url}: {e}")
+        return page
+
     async def close(self):
         try:
             """Closes the browser."""

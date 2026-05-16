@@ -2,6 +2,7 @@ from .base import BaseService
 import logging
 import base64
 import io
+import asyncio
 from PIL import Image
 from urllib.parse import urlparse, parse_qs
 from pyzbar.pyzbar import decode as pyzbar_decode
@@ -148,7 +149,7 @@ class CheckoutService(BaseService):
     #         return f"Error: {str(e)}"
     
     async def click_pay_now(self):
-        """Clicks the final Pay Now button."""
+        """Clicks the final Pay Now button and checks whether order placement started."""
         try:
             # Strategy 1: Specific class partial match
             pay_btn_specific = self.page.locator(
@@ -160,7 +161,9 @@ class CheckoutService(BaseService):
             ):
                 await pay_btn_specific.first.click()
                 print("Clicked 'Pay Now'. Please approve the payment on your UPI app.")
-                return "Clicked Pay Now."
+                if await self._wait_for_order_confirmation():
+                    return "Clicked Pay Now. Order placed and page shows Packing your order."
+                return "Clicked Pay Now. Order placement not confirmed yet."
 
             # Strategy 2: Text match on page
             pay_btn_text = (
@@ -169,7 +172,9 @@ class CheckoutService(BaseService):
             if await pay_btn_text.count() > 0 and await pay_btn_text.is_visible():
                 await pay_btn_text.click()
                 print("Clicked 'Pay Now'.")
-                return "Clicked Pay Now."
+                if await self._wait_for_order_confirmation():
+                    return "Clicked Pay Now. Order placed and page shows Packing your order."
+                return "Clicked Pay Now. Order placement not confirmed yet."
 
             # Strategy 3: Check inside iframe
             iframe_element = await self.page.query_selector("#payment_widget")
@@ -180,7 +185,9 @@ class CheckoutService(BaseService):
                     if await frame_btn.count() > 0:
                         await frame_btn.first.click()
                         print("Clicked payment button inside iframe.")
-                        return "Clicked payment button inside iframe."
+                        if await self._wait_for_order_confirmation():
+                            return "Clicked payment button inside iframe. Order placed and page shows Packing your order."
+                        return "Clicked payment button inside iframe. Order placement not confirmed yet."
 
             print("Could not find 'Pay Now' button (timeout or not in DOM).")
             return "Could not find Pay Now button."
@@ -188,6 +195,18 @@ class CheckoutService(BaseService):
         except Exception as e:
             print(f"Error clicking Pay Now: {e}")
             return f"Error: {str(e)}"
+
+    async def _wait_for_order_confirmation(self, timeout: int = 15000) -> bool:
+        """Wait for the order confirmation page text after payment."""
+        try:
+            confirmation_locator = self.page.locator(
+                "div.tw-text-300.tw-font-semibold.tw-line-clamp-2",
+                has_text="Packing your order"
+            )
+            await confirmation_locator.wait_for(state="visible", timeout=timeout)
+            return True
+        except Exception:
+            return False
         
     async def select_cash_payment(self):
      """Select Cash on Delivery inside the payment iframe."""
@@ -221,7 +240,9 @@ class CheckoutService(BaseService):
             await cash_panel.first.click()
 
         print("Selected Cash on Delivery.")
-        return "OK: Cash on Delivery selected."
+        if await self._wait_for_order_confirmation():
+            return "OK: Cash on Delivery selected and Packing your order page detected."
+        return "OK: Cash on Delivery selected, but order confirmation page was not detected yet."
 
      except Exception as e:
         return f"ERROR: {str(e)}"
@@ -234,7 +255,7 @@ class CheckoutService(BaseService):
      try:
         iframe_element = await self.page.wait_for_selector(
             "#payment_widget",
-            timeout=30000
+            timeout=40000
         )
 
         if not iframe_element:
@@ -247,20 +268,24 @@ class CheckoutService(BaseService):
 
         # Wait for iframe content to stabilize
         await frame.wait_for_load_state("networkidle")
-
+        asyncio.sleep(1)  # Extra wait for dynamic content
         # Locate button
         make_payment_btn = frame.get_by_role(
             "button",
-            name="Make payment"
+            name="Make Payment"
         )
 
+        try:
         # Click
-        await make_payment_btn.click()
-
-        logger.info("Clicked Make payment.")
-
-        return "OK: Payment initiated."
-
+            await make_payment_btn.click()
+            logger.info("Clicked Make payment.")
+            if await self._wait_for_order_confirmation():
+                return "OK: Payment initiated and Packing your order page detected."
+            else:
+                await make_payment_btn.click()
+                return "OK: Payment initiated, but order confirmation page was not detected yet."
+        except Exception as click_e:
+            logger.error(f"Failed to click Make payment on first try: {click_e}")
      except Exception as e:
          
         logger.exception("Failed to click Make payment")
