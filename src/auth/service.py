@@ -2,17 +2,28 @@ import os
 import tempfile
 import shutil
 import glob
+from pathlib import Path
 from playwright.async_api import async_playwright
 
 
 class BlinkitAuth:
-    def __init__(self, headless: bool = False, session_path: str = None):
+    def __init__(self, headless: bool = False, session_path: str = None, phone_number: str = None, account_name: str = None):
         self.headless = headless
+        self.phone_number = phone_number
         if session_path:
             self.session_path = session_path
         else:
-            # Use a safe directory in home folder to avoid permission/read-only issues
-            self.session_path = os.path.expanduser("~/.blinkit_mcp/cookies/auth.json")
+            # Generate unique session path based on account name - use Path for cross-platform compatibility
+            home_dir = Path.home()
+            cookies_dir = home_dir / ".blinkit_mcp" / "cookies"
+            
+            if account_name:
+                # Sanitize account name for use in filename (lowercase, replace spaces with underscores)
+                safe_name = account_name.lower().replace(" ", "_").replace("-", "_")
+                self.session_path = str(cookies_dir / f"{safe_name}.json")
+            else:
+                # Use a safe directory in home folder to avoid permission/read-only issues
+                self.session_path = str(cookies_dir / "auth.json")
 
         self.playwright = None
         self.browser = None
@@ -21,6 +32,11 @@ class BlinkitAuth:
 
     async def start_browser(self):
         """Starts the Playwright browser (Firefox)."""
+        # Ensure session directory exists before attempting to load session
+        session_dir = os.path.dirname(self.session_path)
+        os.makedirs(session_dir, exist_ok=True)
+        print(f"[SESSION] Path: {self.session_path}")
+        
         self.playwright = await async_playwright().start()
         self.browser = await self.playwright.firefox.launch(headless=self.headless)
         print(f"[BROWSER] Using: {self.browser.browser_type.name}")
@@ -206,9 +222,13 @@ class BlinkitAuth:
     async def save_session(self):
         """Saves functionality cookies to file."""
         # Ensure directory exists
-        os.makedirs(os.path.dirname(self.session_path), exist_ok=True)
-        await self.context.storage_state(path=self.session_path)
-        print(f"Session saved to {self.session_path}")
+        session_dir = os.path.dirname(self.session_path)
+        os.makedirs(session_dir, exist_ok=True)
+        try:
+            await self.context.storage_state(path=self.session_path)
+            print(f"[SESSION] Saved to {self.session_path}")
+        except Exception as e:
+            print(f"[ERROR] Failed to save session: {e}")
 
     async def new_page(self, url: str = None, timeout: int = 60000):
         """Create a new browser tab/page within the existing context."""

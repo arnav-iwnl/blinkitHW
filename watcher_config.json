@@ -40,6 +40,16 @@
       "label": "Manu"
     }
   ],
+  "auth": [
+    {
+      "name": "Main",
+      "phone": "9016605631"
+    },
+    {
+      "name": "Alt",
+      "phone": "9004356371"
+    }
+  ],
   "defaults": {
     "check_interval": 5,
     "quantity": 1,

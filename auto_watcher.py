@@ -158,7 +158,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProductWatcher:
-    def __init__(self, product_url, latitude, longitude, check_interval=30, location_label="Home", continue_on_out_of_stock=True, telegram_bot_token=None, telegram_channel_id=None, automate_checkout=False, preferred_payment="cash",quantity=1,use_telegram_callbacks=False):
+    def __init__(self, product_url, latitude, longitude, check_interval=30, location_label="Home", continue_on_out_of_stock=True, telegram_bot_token=None, telegram_channel_id=None, automate_checkout=False, preferred_payment="cash",quantity=1,use_telegram_callbacks=False, phone_number=None, account_name=None):
         """
         Initialize the product watcher
         
@@ -172,6 +172,8 @@ class ProductWatcher:
             telegram_bot_token: Telegram bot token for notifications
             telegram_channel_id: Telegram channel ID for notifications
             automate_checkout: If True, automatically proceed with checkout steps (default False)
+            phone_number: Phone number for login (optional)
+            account_name: Account name for session storage (optional)
         """
         self.product_url = product_url
         self.latitude = latitude
@@ -184,6 +186,10 @@ class ProductWatcher:
         self.expected_product_name = None
         # Label of the saved address to select via site UI (e.g., 'Home')
         self.location_label = location_label or "Home"
+        # Phone number for login (optional)
+        self.phone_number = phone_number
+        # Account name for session storage
+        self.account_name = account_name
         # Continue refreshing if product goes out of stock
         self.continue_on_out_of_stock = continue_on_out_of_stock
         # Automatically proceed with checkout steps
@@ -209,7 +215,9 @@ class ProductWatcher:
             "location_label": location_label,
             "continue_on_out_of_stock": continue_on_out_of_stock,
             "telegram_bot_token": telegram_bot_token,
-            "telegram_channel_id": telegram_channel_id
+            "telegram_channel_id": telegram_channel_id,
+            "phone_number": phone_number,
+            "account_name": account_name
         }
         self.inventory_data = {}
         
@@ -815,12 +823,15 @@ class ProductWatcher:
         # Initialize browser and auth
         try:
             logger.info("Initializing Blinkit authentication...")
+            logger.info(f"Account name: {self.account_name}, Phone: {self.phone_number}")
             if self.latitude and self.longitude:
                 logger.info(f"Using location: Latitude {self.latitude}, Longitude {self.longitude}")
             else:
                 logger.info("No coordinates provided — will select saved address via site UI (Home)")
-            self.auth = BlinkitAuth(headless=True) # Show browser
+            self.auth = BlinkitAuth(headless=False, phone_number=self.phone_number, account_name=self.account_name) # Show browser
+            logger.info("Starting browser...")
             await self.auth.start_browser()
+            logger.info("Browser started successfully")
 
             # If coordinates not provided, try selecting saved 'Home' address via the location bar UI
             if not (self.latitude and self.longitude):
@@ -877,9 +888,32 @@ class ProductWatcher:
                     logger.warning(f"Failed to set geolocation: {e}")
             
             if not await self.auth.is_logged_in():
-                logger.error("Not logged in!")
+                if self.phone_number:
+                    logger.info(f"Not logged in. Attempting login with phone: {self.phone_number}")
+                    await self.auth.login(self.phone_number)
+                    await asyncio.sleep(2)
+                    # Manual OTP entry prompt
+                    otp = input("Enter OTP from your phone: ").strip()
+                    if otp:
+                        await self.auth.enter_otp(otp)
+                        await asyncio.sleep(3)
+                else:
+                    logger.error("Not logged in and no phone number provided!")
+                    await self.auth.close()
+                    return False
+
+            if not await self.auth.is_logged_in():
+                logger.error("Login failed!")
                 await self.auth.close()
                 return False
+
+            # Save session after successful login (or refresh existing session file)
+            try:
+                logger.info("Saving browser session to disk...")
+                await self.auth.save_session()
+                logger.info(f"Session saved: {self.auth.session_path}")
+            except Exception as e:
+                logger.warning(f"Failed to save session after login: {e}")
             
             logger.info("[OK] Logged in successfully")
             logger.info(f"[OK] Location set to: Lat {self.latitude}, Lon {self.longitude}")
@@ -1455,6 +1489,7 @@ async def main():
     config = load_watcher_config()
     products = config.get("products", [])
     addresses = config.get("addresses", [])
+    auth_sessions = config.get("auth", [])
     defaults = config.get("defaults", {})
 
     if products:
@@ -1478,6 +1513,18 @@ async def main():
         print(f"Selected address: {location_label}")
     else:
         location_label = input("\nEnter saved address label to select (default 'Home'): ").strip() or "Home"
+
+    phone_number = None
+    account_name = None
+    if auth_sessions:
+        selected_auth = choose_config_option(auth_sessions, "Saved authentication accounts:", default_label_key="name")
+        phone_number = selected_auth.get("phone", "").strip()
+        account_name = selected_auth.get("name", "").strip()
+        print(f"Selected account: {account_name}")
+    else:
+        phone_input = input("\nEnter phone number for login (or press Enter to skip): ").strip()
+        if phone_input:
+            phone_number = phone_input
 
     check_interval = defaults.get("check_interval", 5)
     try:
@@ -1518,6 +1565,10 @@ async def main():
 
     logger.info(f"Product URL: {product_url}")
     logger.info(f"Location: using site-saved address ('{location_label}') via UI")
+    if account_name:
+        logger.info(f"Account: {account_name}")
+    if phone_number:
+        logger.info(f"Phone: {phone_number}")
     logger.info(f"Check interval: {check_interval} seconds")
     logger.info(f"Continue on out-of-stock: {'YES - will keep refreshing' if continue_on_oos else 'NO - will stop'}")
     logger.info(f"Automate checkout: {'YES - will auto proceed through checkout' if automate_checkout else 'NO - will stop after adding to cart'}")
@@ -1551,6 +1602,8 @@ async def main():
             preferred_payment=preferred_payment,
             quantity=quantity,
             use_telegram_callbacks=use_telegram_callbacks,
+            phone_number=phone_number,
+            account_name=account_name,
         )
         success = await watcher.watch(max_checks=None)  # Infinite checks
         
