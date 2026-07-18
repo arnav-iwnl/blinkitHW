@@ -1,12 +1,20 @@
 {
   "products": [
     {
-      "name": "Kick Sauber F1",
-      "url": "https://blinkit.com/prn/x/prid/774413"
+      "name": "Dodge Charger RT FnF",
+      "url": "https://blinkit.com/prn/hot-wheels-1970-dodge-charger-rt-die-cast-car/prid/796786"
     },
     {
-      "name": "Ferrari SF90 Black-Red Tyre",
-      "url": "https://blinkit.com/prn/x/prid/774454"
+      "name": "BMW M5 FnF",
+      "url": "https://blinkit.com/prn/x/prid/796671"
+    },
+    {
+      "name": "W/ STH Subaru Impreza WRX Die Cast Car",
+      "url": "https://blinkit.com/prn/hot-wheels-subaru-impreza-wrx-die-cast-car/prid/787950"
+    },
+    {
+      "name": "Ferrari F1",
+      "url": "https://blinkit.com/prn/x/prid/772252"
     },
     {
         "name": "Test",

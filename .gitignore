@@ -1,12 +1,33 @@
+# ── Environment & Secrets ─────────────────────────────────────────────────────
 .env
-functions.py
+
+# ── Python ────────────────────────────────────────────────────────────────────
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# ── Runtime Data & Logs ──────────────────────────────────────────────────────
+data/*
+!data/.gitkeep
+logs/*
+!logs/.gitkeep
 *.log
-product_status.json
 *.tmp
+
+# ── Legacy status files (root level, kept for backwards compat) ───────────────
+product_status.json
+product_watcher.log
+
+# ── OS / IDE ──────────────────────────────────────────────────────────────────
 .DS_Store
+.vscode/
+*.swp
+
+# ── Project-specific ignores ─────────────────────────────────────────────────
 node_modules/
 blinkit_products.xlsx
 zepto_chromium_data/
@@ -14,3 +35,6 @@ zepto_cookies.json
 zepto_status.json
 hot-wheels-urls.json
 hot-wheels-urls.txt
+checkpoint_scrapling.json
+blnkit.cmd
+functions.py

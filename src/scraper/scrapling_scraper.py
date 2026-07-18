@@ -283,12 +283,39 @@ def _load_checkpoint():
         return set(data["processed"]), data["results"]
     return set(), []
 
+def _load_existing_output() -> dict:
+    if OUTPUT_FILE.exists():
+        with open(OUTPUT_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
 def _save_checkpoint(processed: set, results: list):
+    existing_processed = set()
+    existing_results = []
+
+    if CHECKPOINT_FILE.exists():
+        try:
+            with open(CHECKPOINT_FILE, encoding="utf-8") as f:
+                existing = json.load(f)
+            existing_processed = set(existing.get("processed", []))
+            existing_results = existing.get("results", [])
+        except Exception:
+            existing_processed = set()
+            existing_results = []
+
+    combined_processed = sorted(existing_processed.union(processed))
+    combined_results_by_id = {}
+
+    for record in existing_results + results:
+        record_id = str(record.get("id"))
+        combined_results_by_id[record_id] = record
+
     with open(CHECKPOINT_FILE, "w") as f:
-        json.dump({"processed": list(processed), "results": results}, f)
+        json.dump({"processed": combined_processed, "results": list(combined_results_by_id.values())}, f)
 
 def _save_output(results: list):
-    out = {}
+    out = _load_existing_output()
+
     for r in results:
         out[r["name"]] = {
             "Price": r["price"],
@@ -296,6 +323,7 @@ def _save_output(results: list):
             "Id": str(r["id"]),
             "Image": r.get("image", "N/A"),
         }
+
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=4)
 
