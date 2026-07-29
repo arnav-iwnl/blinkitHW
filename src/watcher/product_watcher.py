@@ -678,7 +678,22 @@ class ProductWatcher:
                         await asyncio.sleep(1)
                         location_selector = f"text={self.location_label}"
                         if await self.auth.page.is_visible(location_selector):
-                            await self.auth.page.click(location_selector)
+                            try:
+                                await self.auth.page.click(location_selector)
+                            except Exception as e:
+                                logger.debug(f"Direct click failed: {e}. Trying JS click and overlay workaround.")
+                                try:
+                                    await self.auth.page.wait_for_selector("div.LocationDropDown__LocationOverlay-sc-bx29pc-1", state="hidden", timeout=3000)
+                                    await self.auth.page.click(location_selector)
+                                except Exception:
+                                    try:
+                                        script = "(label) => { const el = Array.from(document.querySelectorAll('*')).find(n => n.innerText && n.innerText.trim() === label); if (el) { el.click(); return true; } return false; }"
+                                        ok = await self.auth.page.evaluate(script, self.location_label)
+                                        if not ok:
+                                            await self.auth.page.evaluate("() => { const o = document.querySelector('div.LocationDropDown__LocationOverlay-sc-bx29pc-1'); if (o) o.style.pointerEvents = 'none'; }")
+                                            await self.auth.page.click(location_selector)
+                                    except Exception as ex2:
+                                        logger.warning(f"Failed to click location via JS fallback: {ex2}")
                             await asyncio.sleep(2)
                             logger.info(f"Selected saved address: {self.location_label}")
                             if await self.auth.page.is_visible("text=My Cart"):
@@ -695,7 +710,22 @@ class ProductWatcher:
                                 await asyncio.sleep(1)
                                 location_selector = f"text={self.location_label}"
                                 if await self.auth.page.is_visible(location_selector):
-                                    await self.auth.page.click(location_selector)
+                                    try:
+                                        await self.auth.page.click(location_selector)
+                                    except Exception as e:
+                                        logger.debug(f"Direct click (broad) failed: {e}. Trying JS click and overlay workaround.")
+                                        try:
+                                            await self.auth.page.wait_for_selector("div.LocationDropDown__LocationOverlay-sc-bx29pc-1", state="hidden", timeout=3000)
+                                            await self.auth.page.click(location_selector)
+                                        except Exception:
+                                            try:
+                                                script = "(label) => { const el = Array.from(document.querySelectorAll('*')).find(n => n.innerText && n.innerText.trim() === label); if (el) { el.click(); return true; } return false; }"
+                                                ok = await self.auth.page.evaluate(script, self.location_label)
+                                                if not ok:
+                                                    await self.auth.page.evaluate("() => { const o = document.querySelector('div.LocationDropDown__LocationOverlay-sc-bx29pc-1'); if (o) o.style.pointerEvents = 'none'; }")
+                                                    await self.auth.page.click(location_selector)
+                                            except Exception as ex2:
+                                                logger.warning(f"Failed to click location via JS fallback (broad): {ex2}")
                                     await asyncio.sleep(2)
                                     logger.info(
                                         f"Selected saved address: {self.location_label} (broad selector)"
